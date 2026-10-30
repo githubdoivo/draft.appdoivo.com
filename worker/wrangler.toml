@@ -1,0 +1,16 @@
+# job-api: the private side of job.appdoivo.com. Holds the AI key, checks the
+# passcode, keeps the monthly cap and the saved results. Deploy: npm run deploy.
+# Secrets (never in this file): wrangler secret put ANTHROPIC_API_KEY / PASSCODE_HASH
+name = "job-api"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+MONTHLY_CAP_USD = "3"
+DAILY_RUNS = "40"
+ALLOWED_ORIGINS = "https://job.appdoivo.com,http://localhost:4182"
+
+[[kv_namespaces]]
+binding = "JOB"
+id = "REPLACE_WITH_KV_ID"
