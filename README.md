@@ -9,7 +9,7 @@ what the CV already shows; what the ad asks for and the CV lacks is listed as a 
 
 | Part | Where | What it does |
 | --- | --- | --- |
-| The page | `index.html`, `app.js`, `job.css`, `words.js` | Reads the uploaded CV (PDF, Word or text) in the browser, sends it to the AI service, shows the result. EN/PT, light/dark. |
+| The page | `index.html`, `app.js`, `job.css`, `words.js` | The machine: one box, one step at a time (CV, job, company, tailor) with Back/Continue, live validation, character limits matching the AI service, and what it understood shown under each input (name/contact/roles from the CV, the job's key terms, the company's values, a summary before tailoring). The result preview appears below. EN/PT, light/dark. |
 | The CV shape | `lib/cv.js` | One description of a CV and a letter. The AI fills it; every output reads only it. Also the section titles, the five colours and a made-up example person. |
 | PDF | `lib/pdf.js` | One column, real text in reading order, Helvetica, standard section titles, dates under each title (never at the right edge, where some parsers lose them), no tables, images or text boxes. pdf-lib. |
 | Word | `lib/docx.js` | Real Word headings and bullets, Calibri, same layout. docx. |

@@ -8,16 +8,21 @@ const answer = async (page) => {
   const { SAMPLE } = await page.evaluate(async () => import("/lib/cv.js"));
   return { cv: SAMPLE.cv, letter: SAMPLE.letter, keywords: SAMPLE.keywords, notes: { changes: ["Moved TypeScript up."], gaps: ["Accessibility testing"] }, cached: false, cost: "$0.0412", month: "$0.04", cap: "$3.00" };
 };
-// Walks the steps: each one only appears once the one before is done
+// Walks the machine: Continue only works once the step is valid; Back returns
+const CV = "Alex Morgan\nalex.morgan@example.com | +351 910 000 000\nQA Engineer, Northwind 2022 - present\n" + "Built Playwright and TypeScript test suites for checkout. ".repeat(12);
 const fillForm = async (page) => {
-  await expect(page.locator('.step[data-step="2"]')).toBeHidden();
+  await expect(page.locator("#next")).toBeDisabled();
   await page.locator("#paste-toggle").click();
-  await page.locator("#cv-text").fill("Alex Morgan. QA engineer. ".repeat(30));
-  await page.locator('[data-next="1"]').click();
-  await expect(page.locator('.step[data-step="3"]')).toBeHidden();
+  await page.locator("#cv-text").fill(CV);
+  await expect(page.locator("#read-cv")).toContainText("Alex Morgan");
+  await page.locator("#next").click();
+  await expect(page.locator('.panel[data-step="1"]')).toBeHidden();             // the previous step is put away
+  await expect(page.locator("#next")).toBeDisabled();
   await page.locator("#job").fill("We need a QA automation engineer with Playwright and TypeScript. ".repeat(4));
-  await page.locator('[data-next="2"]').click();
-  await page.locator('[data-next="3"][data-skip]').click();
+  await expect(page.locator("#read-job")).toContainText("Playwright");
+  await page.locator("#next").click();
+  await page.locator("#skip").click();
+  await expect(page.locator("#summary")).toContainText("Pasted Text");
   await expect(page.locator("#tailor")).toBeVisible();
 };
 
@@ -77,7 +82,6 @@ test("tailoring: passcode, the answer, its cost, and the errors", async ({ page 
     route.fulfill({ status: 200, json: await answer(page) });
   });
   await page.goto("/?lang=en");
-  await expect(page.locator('[data-next="1"]')).toBeDisabled();             // no CV yet: cannot move on
   await fillForm(page);
   await page.locator("#tailor").click();
   await page.locator("#pass").fill("wrong");
@@ -113,7 +117,7 @@ test("Portuguese: same words, Title Case labels, impersonal", async ({ page }) =
   expect(keys(WORDS.pt)).toEqual(keys(WORDS.en));
   expect(keys(WORDS.pt.checks)).toEqual(keys(WORDS.en.checks));
   const small = new Set(["o", "a", "os", "as", "de", "do", "da", "dos", "das", "e", "em", "no", "na", "à", "ao", "um", "uma", "por", "para", "com", "se", "ou"]);
-  for (const k of ["continue", "skip", "stepGo", "stepCv", "choose", "pasteInstead", "stepJob", "stepCompany", "colour", "model", "tailor", "example", "tabLetter", "dlPdf", "dlWord", "check", "found", "gaps", "changes"])
+  for (const k of ["back", "pasted", "tCompany", "sumOut", "continue", "skip", "stepGo", "stepCv", "choose", "pasteInstead", "stepJob", "stepCompany", "colour", "model", "tailor", "example", "tabLetter", "dlPdf", "dlWord", "check", "found", "gaps", "changes"])
     WORDS.pt[k].split(/\s+/).forEach((w, i) => { if (i === 0 || !small.has(w.toLowerCase())) expect(w[0], `${k}: ${WORDS.pt[k]}`).toBe(w[0].toUpperCase()); });
   expect(JSON.stringify(WORDS.pt)).not.toMatch(/\b(tu|teu|tua|você)\b/i);
 });
@@ -125,9 +129,25 @@ test("no sideways scroll, 44px targets, no serious accessibility problems, light
     await page.locator("#example").click();
     await expect(page.locator("#checks li")).toHaveCount(11);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
-    for (const sel of ["#lang", "#mode", '[data-next="1"]', "#example", ".swatch >> nth=0", "#tab-cv", '[data-dl="cv-pdf"]'])
+    for (const sel of ["#lang", "#mode", "#next", "#example", ".swatch >> nth=0", "#tab-cv", '[data-dl="cv-pdf"]'])
       expect((await page.locator(sel).boundingBox()).height, sel).toBeGreaterThanOrEqual(44);
     const r = await new AxeBuilder({ page }).exclude(".paper").analyze();       // the CV itself is a document preview, checked by the ATS check
     expect(r.violations.filter((v) => ["serious", "critical"].includes(v.impact)).map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(", ")}`), scheme).toEqual([]);
   }
+});
+
+test("the machine: one step at a time, Back keeps what was typed, limits are shown", async ({ page }) => {
+  await page.goto("/?lang=en");
+  await expect(page.locator("#step-count")).toHaveText("Step 1 of 4");
+  await expect(page.locator("#back")).toBeHidden();
+  await page.locator("#paste-toggle").click();
+  await page.locator("#cv-text").fill(CV);
+  await expect(page.locator('[data-count="cv-text"]')).toContainText("/ 30,000 characters");
+  await page.locator("#next").click();
+  await expect(page.locator("#step-count")).toHaveText("Step 2 of 4");
+  await page.locator("#job").fill("short");
+  await expect(page.locator("#next")).toBeDisabled();
+  await page.locator("#back").click();
+  await expect(page.locator("#cv-text")).toHaveValue(CV);
+  await expect(page.locator("#next")).toBeEnabled();
 });
