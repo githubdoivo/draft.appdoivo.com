@@ -52,7 +52,8 @@ async function take(file) {
     cvText = (await readUpload(file)).trim(); cvFile = file.name;
     if (words(cvText) < 40) throw new Error("empty");
     status("cv-status", w.readOk.replace("{n}", words(cvText)).replace("{f}", file.name));
-  } catch (_) { cvText = ""; status("cv-status", w.readFail, true); }
+    check(); open(2);                                                        // a file that reads well moves straight on
+  } catch (_) { cvText = ""; status("cv-status", w.readFail, true); check(); }
 }
 $("cv-file").addEventListener("change", (e) => e.target.files[0] && take(e.target.files[0]));
 const drop = $("drop");
@@ -64,6 +65,23 @@ $("paste-toggle").addEventListener("click", () => {
   if (!t.hidden) t.focus();
 });
 $("cv-text").addEventListener("input", (e) => { cvText = e.target.value.trim(); cvFile = ""; });
+
+// ---- steps: each appears once the one before it is done ----
+const step = (n) => document.querySelector(`.step[data-step="${n}"]`);
+const ready = { 1: () => words(cvText) >= 40, 2: () => $("job").value.trim().length >= 80, 3: () => $("company").value.trim().length >= 40 };
+function check() { for (const n of [1, 2, 3]) document.querySelector(`[data-next="${n}"]:not([data-skip])`).disabled = !ready[n](); }
+function open(n) {
+  const el = step(n); if (!el || !el.hidden) return;
+  el.hidden = false; step(n - 1)?.classList.add("done");
+  el.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  el.querySelector("textarea, select")?.focus({ preventScroll: true });
+}
+document.querySelectorAll("[data-next]").forEach((b) => b.addEventListener("click", () => {
+  const n = +b.dataset.next;
+  if (b.hasAttribute("data-skip")) $("company").value = "";
+  open(n + 1);
+}));
+["job", "company", "cv-text"].forEach((id) => $(id).addEventListener("input", check));
 
 // ---- options ----
 $("swatches").addEventListener("click", (e) => {
@@ -161,4 +179,4 @@ document.querySelectorAll("[data-dl]").forEach((b) => b.addEventListener("click"
 }));
 
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paintTheme);
-fill();
+fill(); check();
