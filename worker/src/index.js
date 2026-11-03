@@ -193,7 +193,11 @@ export default {
     if (!who) { await env.JOB.put(failKey, String(fails + 1), { expirationTtl: 3600 }); return json({ error: "passcode" }, 401, h); }
 
     let input;
-    try { input = await req.json(); } catch (_) { return json({ error: "bad_request" }, 400, h); }
+    // The size is checked on what actually arrived, not only on the header (which can be left out)
+    const raw = await req.text();
+    if (raw.length > 200_000) return json({ error: "too_large" }, 413, h);
+    try { input = JSON.parse(raw); } catch (_) { return json({ error: "bad_request" }, 400, h); }
+    if (!input || typeof input !== "object" || Array.isArray(input)) return json({ error: "bad_request" }, 400, h);
 
     if (url.pathname === "/job") {
       const found = await readJob(clean(input.url, 2000)).catch(() => null);
