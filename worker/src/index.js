@@ -19,24 +19,27 @@ const CACHE_DAYS = 30;
 // ---- the answer's shape: exactly what the page's templates read (lib/cv.js) ----
 const str = { type: "string" }, strs = { type: "array", items: str };
 const obj = (props) => ({ type: "object", properties: props, required: Object.keys(props), additionalProperties: false });
-const contact = obj({ email: str, phone: str, location: str, links: { type: "array", items: obj({ label: str, url: str }) } });
-const SCHEMA = obj({
-  cv: obj({
-    lang: { type: "string", enum: ["en", "pt"] }, name: str, headline: str, contact, summary: str,
-    skills: { type: "array", items: obj({ group: str, items: strs }) },
-    experience: { type: "array", items: obj({ title: str, company: str, location: str, start: str, end: str, bullets: strs }) },
-    projects: { type: "array", items: obj({ name: str, detail: str, bullets: strs }) },
-    education: { type: "array", items: obj({ degree: str, school: str, location: str, start: str, end: str, detail: str }) },
-    certifications: { type: "array", items: obj({ name: str, issuer: str, year: str }) },
-    languages: { type: "array", items: obj({ name: str, level: str }) },
+const list = (props) => ({ type: "array", items: obj(props) });
+// Kept small on purpose: the API turns the schema into a grammar and refuses one that
+// is too large. The contact block is defined once and reused; the letter always has
+// the same shape (no anyOf) and is empty when there is no company text.
+const SCHEMA = {
+  ...obj({
+    cv: obj({
+      lang: str, name: str, headline: str, contact: { $ref: "#/$defs/contact" }, summary: str,
+      skills: list({ group: str, items: strs }),
+      experience: list({ title: str, company: str, location: str, start: str, end: str, bullets: strs }),
+      projects: list({ name: str, detail: str, bullets: strs }),
+      education: list({ degree: str, school: str, location: str, start: str, end: str, detail: str }),
+      certifications: list({ name: str, issuer: str, year: str }),
+      languages: list({ name: str, level: str }),
+    }),
+    letter: obj({ date: str, company: str, recipient: str, greeting: str, paragraphs: strs, closing: str }),
+    keywords: strs,
+    notes: obj({ changes: strs, gaps: strs }),
   }),
-  letter: { anyOf: [{ type: "null" }, obj({
-    lang: { type: "string", enum: ["en", "pt"] }, date: str, company: str, recipient: str, greeting: str,
-    paragraphs: strs, closing: str, name: str, contact,
-  })] },
-  keywords: strs,
-  notes: obj({ changes: strs, gaps: strs }),
-});
+  $defs: { contact: obj({ email: str, phone: str, location: str, links: list({ label: str, url: str }) }) },
+};
 
 const SYSTEM = `You tailor a candidate's CV to one job ad, and write a cover letter when a company description is given.
 
@@ -62,13 +65,14 @@ THE CV (it must pass applicant tracking systems and AI screeners)
 - Plain text only: no emoji, symbols, markdown, tables or special characters beyond normal punctuation.
 - Leave arrays empty when the CV has nothing for them.
 
-THE COVER LETTER (only when a company description is given; otherwise letter is null)
+THE COVER LETTER (only when a company description is given)
 - 3 or 4 paragraphs, 220 to 320 words. Specific, warm and plain; no clichés such as "I am writing to express my interest".
 - Paragraph 1: the role and one honest reason this company (use their stated values or mission, in their words where natural).
 - Paragraph 2 (and 3): two or three achievements from the CV that answer the ad's main needs.
 - Last paragraph: what the candidate would bring, and a simple invitation to talk.
 - greeting: "Dear Hiring Team," (pt: "Exma. Equipa de Recrutamento,"), or the person's name when the ad gives one.
-- closing: "Kind regards," (pt: "Com os melhores cumprimentos,"). date: the given date, written out in the letter's language. contact: as in the CV.
+- closing: "Kind regards," (pt: "Com os melhores cumprimentos,"). date: the given date, written out in the letter's language.
+- With no company description, return the letter with every field empty and no paragraphs.
 
 ALSO RETURN
 - keywords: the 12 to 20 skills and terms the ad cares about most, in the ad's own short wording, most important first.
@@ -128,20 +132,27 @@ export default {
 
     const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
     const user = `Today's date: ${today}\n\n<cv>\n${cv}\n</cv>\n\n<job_ad>\n${job}\n</job_ad>\n\n` +
-      (company ? `<company>\n${company}\n</company>` : "<company>(none: set letter to null)</company>");
+      (company ? `<company>\n${company}\n</company>` : "<company>(none: leave the letter empty)</company>");
 
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
     const m = MODELS[model];
+    // Sonnet and Opus: if a safety filter ever declines, the API retries on a suitable model by itself
+    const fallback = model === "haiku" ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" };
+    const ask = (strict) => client.beta.messages.create({
+      model: m.id, max_tokens: 16000, system: SYSTEM,
+      messages: [{ role: "user", content: strict ? user : `${user}\n\nReply with only one JSON object, no other text, following this JSON schema:\n${JSON.stringify(SCHEMA)}` }],
+      output_config: strict ? { effort: "medium", format: { type: "json_schema", schema: SCHEMA } } : { effort: "medium" },
+      ...fallback,
+    });
     let res;
     try {
-      // Sonnet and Opus: if a safety filter ever declines, the API retries on a suitable model by itself
-      const fallback = model === "haiku" ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" };
-      res = await client.beta.messages.create({
-        model: m.id, max_tokens: 16000, system: SYSTEM,
-        messages: [{ role: "user", content: user }],
-        output_config: { effort: "medium", format: { type: "json_schema", schema: SCHEMA } },
-        ...fallback,
-      });
+      try { res = await ask(true); }
+      catch (e) {
+        // The schema itself refused (nothing was generated or charged): plain JSON instead
+        if (e?.status !== 400 || !/grammar|schema/i.test(e?.error?.error?.message || "")) throw e;
+        console.error("schema_refused", e?.error?.error?.message);
+        res = await ask(false);
+      }
     } catch (e) {
       // What the API said (type and message only: never the key or the CV)
       console.error("ai_error", e?.status, e?.error?.error?.type, e?.error?.error?.message || e?.message);
@@ -159,7 +170,11 @@ export default {
     if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") return json({ error: res.stop_reason, cost: usd(cost) }, 502, h);
     const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("");
     let out;
-    try { out = JSON.parse(text); } catch (_) { return json({ error: "parse", cost: usd(cost) }, 502, h); }
+    try { out = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)); } catch (_) { return json({ error: "parse", cost: usd(cost) }, 502, h); }
+    if (!out?.cv?.name && !out?.cv?.experience?.length) return json({ error: "parse", cost: usd(cost) }, 502, h);
+    out.cv.lang = /^pt/i.test(out.cv.lang || "") ? "pt" : "en";
+    // The page reads the letter as the CV's sibling with its own lang, name and contact
+    out.letter = out.letter?.paragraphs?.length ? { ...out.letter, lang: out.cv.lang, name: out.cv.name, contact: out.cv.contact } : null;
 
     await env.JOB.put(key, JSON.stringify(out), { expirationTtl: CACHE_DAYS * 86400 });
     return json({ ...out, cached: false, model, cost: usd(cost), month: usd(total), cap: usd(cap) }, 200, h);
