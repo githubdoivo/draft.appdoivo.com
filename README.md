@@ -15,16 +15,17 @@ what the CV already shows; what the ad asks for and the CV lacks is listed as a 
 | Word | `lib/docx.js` | Real Word headings and bullets, Calibri, same layout. docx. |
 | ATS check | `lib/ats.js` | Reads the finished PDF back with pdf.js, like a parser: text, name, contact, section titles and order, images, pages, dates under their job, file name, and how many of the ad's keywords the CV covers (the AI's list, or a local count as fallback). |
 | Preview | `lib/preview.js` | The same layout as HTML. |
-| AI service | `worker/` | A Cloudflare Worker that holds the Anthropic key. Passcode, monthly dollar cap and daily run limit per account, saved answers (the same CV + job costs nothing twice), cost of every run. Claude with a strict JSON schema. |
+| AI service | `worker/` | A Cloudflare Worker that holds the Anthropic key. `/review`: a quick match check (Haiku) the person answers before paying for the CV; `/tailor`: the CV and letter, written with those answers; `/job`: reads an ad from its link (schema.org JobPosting, LinkedIn's public job page). Passcode (10 wrong tries lock an address for an hour), prepaid credit and a daily run limit per account, saved answers (the same request costs nothing twice). Claude with a strict JSON schema. |
 
 The colours (purple, blue, red, green, yellow) touch only headings and lines, and each one is
 dark enough to read as text on white and to print in black and white.
 
 ## Cost
 
-About $0.003 (Haiku), $0.05 (Sonnet, the default) or $0.10 (Opus) per CV + cover letter.
-The worker refuses new runs past `MONTHLY_CAP_USD` (default $3); set a spending limit in the
-Anthropic console as a second lock.
+About $0.002 for the match check, then $0.003 (Haiku), $0.05 (Sonnet, the default) or $0.10
+(Opus) per CV + cover letter. Each run's real cost comes off the account's prepaid credit
+(`credit:<account>` in KV; the owner starts at `START_CREDIT`). The Anthropic console's
+monthly spending limit is the second lock.
 
 ## Connecting the AI (once)
 
@@ -36,8 +37,14 @@ Anthropic console as a second lock.
 
 ## Later
 
-Accounts with prepaid credits: spending is already kept per account (`spend:<account>:<month>`),
-so credits change who pays, not how runs are counted.
+Accounts and buying credit packs (Stripe): the balance is already kept per account, so a
+purchase only adds to `credit:<account>`. Monthly plans could top it up each month.
+
+## Security
+
+The page allows only its own scripts and talks only to job-api (a Content-Security-Policy).
+The worker answers only the page's origin, needs the passcode on every call, locks an address
+after 10 wrong passcodes, limits sizes, and never logs a CV or the key.
 
 ## Tests
 

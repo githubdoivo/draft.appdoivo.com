@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Only this site's own scripts run, and the page talks only to its own AI service -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-V5qJba2Pfl34pHXr5tflSMB61vARUx4poZzLZG+ElkI='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://job-api.appdoivo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Job · Your CV, Tailored to Every Job</title>
 <meta name="description" content="Upload a CV and a job ad; get a CV and cover letter tailored to that job, built to pass applicant tracking systems.">
 <meta property="og:title" content="Job · Your CV, Tailored to Every Job">
