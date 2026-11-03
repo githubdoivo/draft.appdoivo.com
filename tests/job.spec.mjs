@@ -6,7 +6,7 @@ const API = /job-api\.appdoivo\.com/;
 // A tailored answer, as the AI service returns it: the made-up example person
 const answer = async (page) => {
   const { SAMPLE } = await page.evaluate(async () => import("/lib/cv.js"));
-  return { cv: SAMPLE.cv, letter: SAMPLE.letter, keywords: SAMPLE.keywords, notes: { changes: ["Moved TypeScript up."], gaps: ["Accessibility testing"] }, cached: false, cost: "$0.0412", month: "$0.04", cap: "$3.00" };
+  return { cv: SAMPLE.cv, letter: SAMPLE.letter, keywords: SAMPLE.keywords, notes: { changes: ["Moved TypeScript up."], gaps: ["Accessibility testing"] }, cached: false, cost: "$0.0412", balance: "$4.76" };
 };
 // Walks the machine: Continue only works once the step is valid; Back returns
 const CV = "Alex Morgan\nalex.morgan@example.com | +351 910 000 000\nQA Engineer, Northwind 2022 - present\n" + "Built Playwright and TypeScript test suites for checkout. ".repeat(12);
@@ -78,7 +78,7 @@ test("tailoring: passcode, the answer, its cost, and the errors", async ({ page 
   await page.route(API, async (route) => {
     calls++;
     if (route.request().headers()["x-passcode"] !== "right") return route.fulfill({ status: 401, json: { error: "passcode" } });
-    if (reply === 402) return route.fulfill({ status: 402, json: { error: "cap" } });
+    if (reply === 402) return route.fulfill({ status: 402, json: { error: "credit", balance: "$0.00" } });
     route.fulfill({ status: 200, json: await answer(page) });
   });
   await page.goto("/?lang=en");
@@ -90,11 +90,11 @@ test("tailoring: passcode, the answer, its cost, and the errors", async ({ page 
   await page.locator("#tailor").click();
   await page.locator("#pass").fill("right");
   await page.locator("#pass-form button").click();
-  await expect(page.locator("#result-note")).toContainText("This run cost $0.0412");
+  await expect(page.locator("#result-note")).toHaveText("This run cost $0.0412. Credit left: $4.76.");
   await expect(page.locator("#notes")).toContainText("Accessibility testing");
   reply = 402;
   await page.locator("#tailor").click();                                     // passcode remembered: no dialog
-  await expect(page.locator("#status")).toContainText("spending limit");
+  await expect(page.locator("#status")).toHaveText("The credit has run out.");
   expect(calls).toBe(3);
 });
 
@@ -117,7 +117,7 @@ test("Portuguese: same words, Title Case labels, impersonal", async ({ page }) =
   expect(keys(WORDS.pt)).toEqual(keys(WORDS.en));
   expect(keys(WORDS.pt.checks)).toEqual(keys(WORDS.en.checks));
   const small = new Set(["o", "a", "os", "as", "de", "do", "da", "dos", "das", "e", "em", "no", "na", "à", "ao", "um", "uma", "por", "para", "com", "se", "ou"]);
-  for (const k of ["back", "pasted", "tCompany", "sumOut", "continue", "skip", "stepGo", "stepCv", "choose", "pasteInstead", "stepJob", "stepCompany", "colour", "model", "tailor", "example", "tabLetter", "dlPdf", "dlWord", "check", "found", "gaps", "changes"])
+  for (const k of ["back", "pasted", "tCompany", "sumOut", "continue", "skip", "stepGo", "stepCv", "choose", "pasteInstead", "stepJob", "stepCompany", "colour", "model", "tailor", "example", "tabLetter", "dlPdf", "dlWord", "check", "found", "gaps", "changes", "checkBtn", "have", "missingQ", "suggest", "recheck", "change"])
     WORDS.pt[k].split(/\s+/).forEach((w, i) => { if (i === 0 || !small.has(w.toLowerCase())) expect(w[0], `${k}: ${WORDS.pt[k]}`).toBe(w[0].toUpperCase()); });
   expect(JSON.stringify(WORDS.pt)).not.toMatch(/\b(tu|teu|tua|você)\b/i);
 });
@@ -171,4 +171,56 @@ test("a reload keeps the CV, the job, the company and the step (this tab only)",
   await expect(page.locator("#job")).toHaveValue(/QA automation engineer/);
   await page.locator("#back").click();
   await expect(page.locator("#cv-text")).toHaveValue(/Alex Morgan/);
+});
+
+const REVIEW = { role: "QA Automation Engineer", company: "Northwind", score: 72, verdict: "A strong match on automation; no Kubernetes shown.",
+  have: [{ term: "Playwright", evidence: "Northwind, checkout tests" }], missing: [{ term: "Kubernetes", question: "Have you worked with Kubernetes?" }, { term: "Java", question: "Have you used Java?" }],
+  suggestions: ["Lead the summary with Playwright", "Move TypeScript into the headline"], cost: "$0.0021", balance: "$4.99" };
+
+test("the review board: a quick check first, then the CV is written with the person's choices", async ({ page }) => {
+  let body = null;
+  await page.route(API, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/review") return route.fulfill({ status: 200, json: REVIEW });
+    body = route.request().postDataJSON();
+    route.fulfill({ status: 200, json: await answer(page) });
+  });
+  await page.goto("/?lang=en");
+  await page.evaluate(() => localStorage.setItem("pass", "right"));            // the owner's device: the check runs straight away
+  await page.locator("#paste-toggle").click();
+  await page.locator("#cv-text").fill(CV);
+  await page.locator("#next").click();
+  await page.locator("#job").fill("We need a QA automation engineer with Playwright and TypeScript. ".repeat(4));
+  await page.locator("#next").click();
+  await page.locator("#skip").click();
+  await expect(page.locator("#review")).toContainText("72% Match");
+  await expect(page.locator("#credit")).toHaveText("Credit: $4.99");
+  await page.locator('[data-yes="0"]').check();
+  await page.locator('[data-note="0"]').fill("Deloitte, two client projects");
+  await page.locator('[data-sug="1"]').uncheck();
+  await page.locator("#tailor").click();
+  await expect(page.locator("#result-note")).toContainText("Credit left: $4.76");
+  expect(body.choices).toEqual({ confirmed: [{ term: "Kubernetes", note: "Deloitte, two client projects" }], apply: ["Lead the summary with Playwright"], skip: ["Move TypeScript into the headline"] });
+  await page.reload();                                                         // the choices survive a reload, with no second check
+  await expect(page.locator('[data-yes="0"]')).toBeChecked();
+});
+
+test("a job link is read for you; a page that cannot be read says so", async ({ page }) => {
+  let ok = true;
+  await page.route(API, (route) => ok
+    ? route.fulfill({ status: 200, json: { title: "QA Engineer", company: "Northwind", text: "We need a QA automation engineer with Playwright and TypeScript. ".repeat(4) } })
+    : route.fulfill({ status: 422, json: { error: "unreadable" } }));
+  await page.goto("/?lang=en");
+  await page.evaluate(() => localStorage.setItem("pass", "right"));
+  await page.locator("#paste-toggle").click();
+  await page.locator("#cv-text").fill(CV);
+  await page.locator("#next").click();
+  await page.locator("#job").fill("https://www.linkedin.com/jobs/view/4481307816/");
+  await expect(page.locator("#job")).toHaveValue(/^QA Engineer · Northwind\n\nWe need/);
+  await expect(page.locator("#job-status")).toHaveText("✓ Read from linkedin.com. Check it, then continue.");
+  await expect(page.locator("#next")).toBeEnabled();
+  ok = false;
+  await page.locator("#job").fill("https://example.com/careers/42");
+  await expect(page.locator("#job-status")).toHaveText("That page could not be read. Open the ad and paste its text here instead.");
+  await expect(page.locator("#next")).toBeDisabled();
 });

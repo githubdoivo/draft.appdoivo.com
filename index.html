@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/job.css?v=3">
+<link rel="stylesheet" href="/job.css?v=4">
 </head>
 <body>
 <header class="top">
@@ -47,25 +47,28 @@
 
     <section class="panel" data-step="1">
       <h2 class="m-title" tabindex="-1" data-w="stepCv"></h2>
+      <!-- One clear action: upload. Dropping a file works too (said only where a mouse can
+           drag), and pasting is a quiet alternative underneath. -->
       <div class="drop" id="drop">
         <input type="file" id="cv-file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" class="sr">
-        <label for="cv-file" class="btn ghost" data-w="choose"></label>
-        <span class="muted" data-w="drop"></span>
-        <button type="button" class="link" id="paste-toggle" data-w="pasteInstead" aria-expanded="false" aria-controls="cv-paste"></button>
+        <label for="cv-file" class="btn" id="cv-pick" data-w="choose"></label>
+        <p class="hint" id="cv-status" aria-live="polite" data-w="cvHint"></p>
+        <p class="hint drop-or" data-w="drop"></p>
       </div>
+      <button type="button" class="link quiet" id="paste-toggle" data-w="pasteInstead" aria-expanded="false" aria-controls="cv-paste"></button>
       <div id="cv-paste" hidden>
         <label class="sr" for="cv-text" data-w="cvPaste"></label>
         <textarea id="cv-text" rows="9" maxlength="30000"></textarea>
         <p class="count" data-count="cv-text"></p>
       </div>
-      <p class="hint" id="cv-status" aria-live="polite" data-w="cvHint"></p>
       <div class="read" id="read-cv" aria-live="polite"></div>
     </section>
 
     <section class="panel" data-step="2" hidden>
       <h2 class="m-title" tabindex="-1"><label for="job" data-w="stepJob"></label></h2>
-      <textarea id="job" rows="9" maxlength="20000"></textarea>
+      <textarea id="job" rows="9" maxlength="20000" aria-describedby="job-status"></textarea>
       <p class="count" data-count="job"></p>
+      <p class="hint" id="job-status" aria-live="polite" data-w="jobHint"></p>
       <div class="read" id="read-job" aria-live="polite"></div>
     </section>
 
@@ -80,11 +83,18 @@
     <section class="panel" data-step="4" hidden>
       <h2 class="m-title" tabindex="-1" data-w="stepGo"></h2>
       <dl class="summary" id="summary"></dl>
+      <!-- The review board: a cheap check before the paid CV. The person decides what is
+           true and which changes to make; the full CV is then written with those choices. -->
+      <div class="review" id="review" aria-live="polite">
+        <p class="hint" data-w="checkCost"></p>
+        <button type="button" class="btn ghost" id="check" data-w="checkBtn"></button>
+      </div>
       <div class="opt-row">
         <label class="opt-label" for="model" data-w="model"></label>
-        <select id="model"></select>
+        <div><select id="model"></select><p class="hint model-cost" id="model-cost"></p></div>
       </div>
       <p class="hint" data-w="privacy"></p>
+      <p class="hint credit" id="credit" hidden></p>
     </section>
 
     <div class="m-foot">
@@ -140,6 +150,6 @@
 <script src="/vendor/pdf-lib.min.js"></script>
 <script src="/vendor/docx.iife.js"></script>
 <script src="/vendor/mammoth.browser.min.js"></script>
-<script type="module" src="/app.js?v=4"></script>
+<script type="module" src="/app.js?v=5"></script>
 </body>
 </html>

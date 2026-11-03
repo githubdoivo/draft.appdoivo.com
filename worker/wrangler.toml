@@ -1,5 +1,5 @@
 # job-api: the private side of job.appdoivo.com. Holds the AI key, checks the
-# passcode, keeps the monthly cap and the saved results. Deploy: npm run deploy.
+# passcode, keeps each account's prepaid credit and the saved results. Deploy: npm run deploy.
 # Secrets (never in this file): ANTHROPIC_API_KEY and PASSCODE, set in the Cloudflare
 # dashboard (Workers > job-api > Settings > Variables and Secrets) or with wrangler secret put
 name = "job-api"
@@ -9,7 +9,8 @@ compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-MONTHLY_CAP_USD = "3"
+# The owner's first credit in US dollars (only used once, when the account has no balance yet)
+START_CREDIT = "5"
 DAILY_RUNS = "40"
 ALLOWED_ORIGINS = "https://job.appdoivo.com,http://localhost:4182"
 

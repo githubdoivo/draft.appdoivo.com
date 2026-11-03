@@ -184,3 +184,40 @@ textarea#cv-text { margin-top: 12px; }
   .m-foot .btn { padding-inline: 18px; }
 }
 @media (prefers-reduced-motion: reduce) { .machine .panel:not([hidden]) { animation: none; } }
+
+/* ---- Step 1: one clear action ---- */
+.drop { flex-direction: column; align-items: flex-start; gap: 10px; padding: 22px; }
+.drop .btn { min-width: 220px; }
+.drop #cv-status { margin: 0; }
+.drop-or { display: none; }
+@media (hover: hover) and (pointer: fine) { .drop-or { display: block; margin: 0; } }
+.link.quiet { justify-self: start; font-size: 15px; color: var(--muted); text-decoration-color: var(--edge); }
+.link.quiet:hover { color: var(--brass); }
+/* Character counts only matter near the limit */
+.count:not(.near) { visibility: hidden; height: 0; margin: 0; }
+.model-cost { margin-top: 6px; }
+.credit { font-family: var(--mono); font-size: 13px; }
+
+/* ---- Step 4: the review board ---- */
+.review { display: grid; gap: 10px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.review .btn { justify-self: start; }
+.review h3 { font: 500 13px var(--mono); letter-spacing: .04em; color: var(--muted); margin: 10px 0 0; }
+.review .hint { font-size: 14px; }
+.working::after { content: ""; display: inline-block; width: 1ch; animation: dots 1.2s steps(4) infinite; overflow: hidden; vertical-align: bottom; }
+@keyframes dots { from { width: 0; } to { width: 3ch; } }
+.score p b { font: 600 22px var(--serif); }
+.meter { display: block; height: 6px; margin: 8px 0; border-radius: 3px; background: var(--line); overflow: hidden; }
+.meter i { display: block; height: 100%; width: calc(var(--s) * 1%); background: var(--brass); border-radius: 3px; }
+.review .chip { border-color: var(--ok); color: var(--ok); }
+.asks, .sugg { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ask { display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; }
+.ask > span:first-child { flex: 1; min-width: 0; }
+.ask input { appearance: none; -webkit-appearance: none; flex: none; width: 44px; height: 26px; border-radius: 13px; background: var(--line); position: relative; cursor: pointer; transition: background .2s; margin: 0; }
+.ask input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--paper); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: translate .2s; }
+.ask input:checked { background: var(--brass); }
+.ask input:checked::after { translate: 18px 0; }
+.ask .yes { font: 500 13px var(--mono); color: var(--muted); min-width: 3ch; }
+.note { width: 100%; min-height: 44px; margin: 2px 0 8px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 10px; background: var(--paper); }
+.sugg label { display: flex; gap: 12px; align-items: flex-start; padding: 8px 0; cursor: pointer; }
+.sugg input { width: 20px; height: 20px; margin: 3px 0 0; accent-color: var(--brass); flex: none; }
+@media (prefers-reduced-motion: reduce) { .ask input, .ask input::after { transition: none; } .working::after { animation: none; } }

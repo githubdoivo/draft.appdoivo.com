@@ -1,5 +1,5 @@
 // Job: a CV (and cover letter) tailored to one job ad, built to pass applicant tracking systems.
-// The AI writes the content (worker/, behind a passcode and a monthly cap); everything
+// The AI writes the content (worker/, behind a passcode and prepaid credit); everything
 // else, reading the upload, the PDF and Word files, the check, runs here in the browser.
 import { WORDS } from "./words.js";
 import { COLOURS, SAMPLE, fileName } from "./lib/cv.js";
@@ -20,6 +20,7 @@ let w = WORDS[lang];
 let colour = store.get("colour") || "blue";
 let cvText = "", cvFile = "";
 let result = null;                                       // { cv, letter, notes, sample, cost… }
+let review = null;                                       // { key, score, have, missing, suggestions, yes: {i: note}, off: [i] }
 
 // ---- words ----
 function fill() {
@@ -31,11 +32,12 @@ function fill() {
   $("lang").textContent = w.other; $("lang").setAttribute("aria-label", `${w.other}: ${w.otherLabel}`);
   $("swatches").innerHTML = Object.keys(COLOURS).map((k) => `<button type="button" role="radio" class="swatch" data-c="${k}" aria-checked="${k === colour}" style="--sw:${COLOURS[k].hex}"><span>${w.colours[k]}</span></button>`).join("");
   const m = $("model").value || store.get("model") || "sonnet";
-  $("model").innerHTML = Object.keys(MODELS).map((k) => `<option value="${k}">${w.models[k]} (${w.about.replace("{c}", MODELS[k])})</option>`).join("");
-  $("model").value = m;
-  if (cvText && cvFile) status("cv-status", w.readOk.replace("{n}", words(cvText)).replace("{f}", cvFile));
+  $("model").innerHTML = Object.keys(MODELS).map((k) => `<option value="${k}">${w.models[k]}</option>`).join("");
+  $("model").value = m; modelCost();
+  if (cvText && cvFile) cvLoaded();
+  if (credit) showCredit(credit);
   paintTheme();
-  if (typeof at !== "undefined") { $("step-count").textContent = w.stepOf.replace("{n}", at); readCv(); readJob(); readCompany(); if (at === 4) summary(); refresh(); }
+  if (typeof at !== "undefined") { $("step-count").textContent = w.stepOf.replace("{n}", at); readCv(); readJob(); readCompany(); if (at === 4) { summary(); if (review) paintReview(); } refresh(); }
   if (result) show(result);
 }
 const words = (t) => t.trim().split(/\s+/).filter(Boolean).length;
@@ -54,9 +56,10 @@ const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 const chips = (list) => list.map((k) => `<span class="chip">${esc(k)}</span>`).join("");
 let at = 1;
 const panel = (n) => document.querySelector(`.machine .panel[data-step="${n}"]`);
+const isLink = (t) => /^https?:\/\/\S+$/i.test(t.trim());
 const valid = {
   1: () => cvText.length >= MIN.cv && words(cvText) >= 40,
-  2: () => $("job").value.trim().length >= MIN.job,
+  2: () => $("job").value.trim().length >= MIN.job && !isLink($("job").value),
   3: () => true,
 };
 function go(n) {
@@ -67,7 +70,7 @@ function go(n) {
   $("back").hidden = n === 1;
   $("skip").hidden = n !== 3 || $("company").value.trim().length > 0;
   $("next").hidden = n === 4; $("tailor").hidden = n !== 4;
-  if (n === 4) summary();
+  if (n === 4) { summary(); showReview(); }
   refresh();
   panel(n).querySelector(".m-title").focus({ preventScroll: true });
   const box = $("form").getBoundingClientRect();
@@ -121,11 +124,16 @@ function summary() {
 }
 
 // ---- step 1: the CV, uploaded, dropped or pasted ----
+// Once a file is read, the big button steps back to a quiet "Change"
+function cvLoaded() {
+  status("cv-status", "✓ " + w.readOk.replace("{n}", words(cvText)).replace("{f}", cvFile));
+  $("cv-pick").textContent = w.change; $("cv-pick").classList.add("ghost");
+}
 async function take(file) {
   try {
     cvText = (await readUpload(file)).trim().slice(0, LIMIT["cv-text"]); cvFile = file.name;
     if (words(cvText) < 40) throw new Error("empty");
-    status("cv-status", w.readOk.replace("{n}", words(cvText)).replace("{f}", file.name));
+    cvLoaded();
     saveDraft();
     readCv(); refresh();
   } catch (_) { cvText = ""; readCv(); status("cv-status", w.readFail, true); refresh(); }
@@ -141,7 +149,22 @@ $("paste-toggle").addEventListener("click", () => {
 });
 let ct;
 $("cv-text").addEventListener("input", (e) => { cvText = e.target.value.trim(); cvFile = ""; refresh(); saveDraft(); clearTimeout(ct); ct = setTimeout(readCv, 300); });
-$("job").addEventListener("input", () => { refresh(); saveDraft(); clearTimeout(jt); jt = setTimeout(readJob, 300); });
+// A link instead of the ad's text: the AI service reads the page (most job sites, LinkedIn's public job pages)
+let lt;
+$("job").addEventListener("input", () => {
+  refresh(); saveDraft(); clearTimeout(jt); jt = setTimeout(readJob, 300);
+  clearTimeout(lt); if (isLink($("job").value)) lt = setTimeout(() => readLink($("job").value.trim()), 400); else status("job-status", w.jobHint);
+});
+async function readLink(u) {
+  status("job-status", w.linkReading);
+  try {
+    const d = await api("/job", { url: u });
+    if (!d || $("job").value.trim() !== u) return status("job-status", w.jobHint);   // cancelled, or the box changed meanwhile
+    $("job").value = `${[d.title, d.company].filter(Boolean).join(" · ")}\n\n${d.text}`.trim();
+    status("job-status", "✓ " + w.linkOk.replace("{h}", new URL(u).hostname.replace(/^www\./, "")));
+    readJob(); refresh(); saveDraft();
+  } catch (err) { status("job-status", err.say && err.say !== w.failed ? err.say : w.linkFail, true); }
+}
 $("company").addEventListener("input", () => { refresh(); saveDraft(); clearTimeout(jt); jt = setTimeout(readCompany, 300); });
 $("model").addEventListener("change", saveDraft);
 
@@ -158,7 +181,10 @@ $("swatches").addEventListener("keydown", (e) => {                     // arrow 
   const keys = Object.keys(COLOURS), i = keys.indexOf(colour), n = keys[(i + (/Right|Down/.test(e.key) ? 1 : keys.length - 1)) % keys.length];
   document.querySelector(`.swatch[data-c="${n}"]`).click(); document.querySelector(`.swatch[data-c="${n}"]`).focus();
 });
-$("model").addEventListener("change", (e) => store.set("model", e.target.value));
+$("model").addEventListener("change", (e) => { store.set("model", e.target.value); modelCost(); });
+function modelCost() { $("model-cost").textContent = w.about.replace("{c}", MODELS[$("model").value] || MODELS.sonnet); }
+let credit = "";
+function showCredit(b) { credit = b; $("credit").hidden = false; $("credit").textContent = w.credit.replace("{b}", b); }
 
 // ---- tailoring ----
 function askPass() {
@@ -169,26 +195,87 @@ function askPass() {
     d.showModal();
   });
 }
+// Every call to the AI service: the passcode once per device, and plain-language errors
+async function api(path, body) {
+  const pass = store.get("pass") || await askPass();
+  if (!pass) return null;
+  const res = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json", "x-passcode": pass }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { store.set("pass", ""); $("pass-err").hidden = false; throw { say: w.passWrong }; }
+  if (data.balance) showCredit(data.balance);
+  if (res.status === 429 && data.error === "locked") throw { say: w.locked };
+  if (res.status === 402) throw { say: w.capped };
+  if (!res.ok) throw { say: w.failed };
+  store.set("pass", pass); $("pass-err").hidden = true;
+  return data;
+}
+const sayError = (err) => (err instanceof TypeError ? w.offline : err?.say || w.failed);   // TypeError: the AI service cannot be reached
+
+// ---- step 4: the review board, before anything costly ----
+const inputs = () => ({ cv: cvText, job: $("job").value.trim(), company: $("company").value.trim() });
+const reviewKey = () => JSON.stringify(inputs());
+function showReview() {
+  if (review && review.key === reviewKey()) return paintReview();
+  review = null;
+  $("summary").hidden = false;
+  $("review").innerHTML = `<p class="hint">${esc(w.checkCost)}</p><button type="button" class="btn ghost" id="check">${esc(w.checkBtn)}</button>`;
+  if (store.get("pass")) runCheck();                                   // the owner's device: check straight away
+}
+async function runCheck() {
+  $("review").innerHTML = `<p class="hint working">${esc(w.checking)}</p>`;
+  try {
+    const d = await api("/review", { ...inputs(), ui: lang });
+    if (!d) return showReview();
+    review = { ...d, key: reviewKey(), yes: {}, off: [] };
+    saveDraft(); paintReview();
+  } catch (err) {
+    $("review").innerHTML = `<p class="hint bad">${esc(sayError(err))}</p><button type="button" class="btn ghost" id="check">${esc(w.checkBtn)}</button>`;
+  }
+}
+function paintReview() {
+  const r = review;
+  $("summary").hidden = true;
+  $("review").innerHTML = `
+    <div class="score" style="--s:${r.score}"><p><b>${esc(w.match.replace("{n}", r.score))}</b>${r.role ? ` · ${esc(r.role)}` : ""}</p><span class="meter" aria-hidden="true"><i></i></span><p class="muted">${esc(r.verdict)}</p></div>
+    ${r.have.length ? `<h3>${esc(w.have)}</h3><p class="chips">${r.have.map((h) => `<span class="chip" title="${esc(h.evidence)}">${esc(h.term)}</span>`).join("")}</p>` : ""}
+    ${r.missing.length ? `<h3>${esc(w.missingQ)}</h3><p class="hint">${esc(w.missingHint)}</p><ul class="asks">${r.missing.map((m, i) => `
+      <li><label class="ask"><span>${esc(m.question || m.term)}</span><input type="checkbox" role="switch" data-yes="${i}" ${i in r.yes ? "checked" : ""}><span class="yes">${esc(w.yes)}</span></label>
+      <input class="note" data-note="${i}" maxlength="160" placeholder="${esc(w.where)}" aria-label="${esc(m.term)}: ${esc(w.where)}" value="${esc(r.yes[i] || "")}" ${i in r.yes ? "" : "hidden"}></li>`).join("")}</ul>` : ""}
+    ${r.suggestions.length ? `<h3>${esc(w.suggest)}</h3><p class="hint">${esc(w.suggestHint)}</p><ul class="sugg">${r.suggestions.map((t, i) => `
+      <li><label><input type="checkbox" data-sug="${i}" ${r.off.includes(i) ? "" : "checked"}><span>${esc(t)}</span></label></li>`).join("")}</ul>` : ""}
+    <button type="button" class="link quiet" id="recheck">${esc(w.recheck)}</button>`;
+}
+$("review").addEventListener("click", (e) => { if (e.target.id === "check" || e.target.id === "recheck") { review = null; runCheck(); } });
+$("review").addEventListener("change", (e) => {
+  const t = e.target;
+  if (t.dataset.yes !== undefined) {
+    const i = +t.dataset.yes, note = $("review").querySelector(`[data-note="${i}"]`);
+    if (t.checked) { review.yes[i] = review.yes[i] || ""; note.hidden = false; } else { delete review.yes[i]; note.hidden = true; }
+  }
+  if (t.dataset.sug !== undefined) { const i = +t.dataset.sug; review.off = t.checked ? review.off.filter((x) => x !== i) : [...review.off, i]; }
+  saveDraft();
+});
+$("review").addEventListener("input", (e) => { if (e.target.dataset.note !== undefined) { review.yes[+e.target.dataset.note] = e.target.value; saveDraft(); } });
+const choices = () => !review ? undefined : {
+  confirmed: Object.entries(review.yes).map(([i, note]) => ({ term: review.missing[i].term, note })),
+  apply: review.suggestions.filter((_, i) => !review.off.includes(i)),
+  skip: review.suggestions.filter((_, i) => review.off.includes(i)),
+};
+
+// ---- tailoring ----
 $("form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!cvText) return status("status", w.needCv, true);
   const job = $("job").value.trim(); if (!job) { $("job").focus(); return status("status", w.needJob, true); }
-  let pass = store.get("pass") || await askPass();
-  if (!pass) return;
   $("tailor").disabled = true; status("status", w.working);
   try {
-    const res = await fetch(`${API}/tailor`, { method: "POST", headers: { "content-type": "application/json", "x-passcode": pass },
-      body: JSON.stringify({ cv: cvText, job, company: $("company").value.trim(), model: $("model").value, ui: lang }) });
-    if (res.status === 401) { store.set("pass", ""); $("pass-err").hidden = false; return status("status", w.passWrong, true); }
-    if (res.status === 402) return status("status", w.capped, true);
-    if (!res.ok) throw new Error(String(res.status));
-    store.set("pass", pass); $("pass-err").hidden = true;
-    const data = await res.json();
+    const data = await api("/tailor", { ...inputs(), model: $("model").value, ui: lang, choices: review?.key === reviewKey() ? choices() : undefined });
+    if (!data) return status("status", "");
     result = { ...data, job, sample: false };
     status("status", "");
     await show(result);
   } catch (err) {
-    status("status", err instanceof TypeError ? w.offline : w.failed, true);       // TypeError: the AI service cannot be reached
+    status("status", sayError(err), true);
   } finally { $("tailor").disabled = false; }
 });
 $("example").addEventListener("click", async () => {
@@ -203,7 +290,7 @@ $("example").addEventListener("click", async () => {
 const files = {};
 async function show(r) {
   const box = $("result"); box.hidden = false;
-  $("result-note").textContent = r.sample ? w.sample : r.cached ? w.cached : r.cost ? w.cost.replace("{c}", r.cost).replace("{m}", r.month).replace("{cap}", r.cap) : "";
+  $("result-note").textContent = r.sample ? w.sample : r.cached ? w.cached : r.cost ? w.cost.replace("{c}", r.cost).replace("{b}", r.balance || "") : "";
   $("cv-preview").innerHTML = cvHtml(r.cv, colour);
   $("tab-letter").hidden = !r.letter;
   if (r.letter) $("letter-preview").innerHTML = letterHtml(r.letter, colour);
@@ -243,7 +330,7 @@ document.querySelectorAll("[data-dl]").forEach((b) => b.addEventListener("click"
 // The work in progress survives a reload of this tab (sessionStorage), and is forgotten
 // when the tab closes, so a CV never stays behind on a shared device.
 function saveDraft() {
-  try { sessionStorage.setItem("draft", JSON.stringify({ cv: cvText, cvFile, pasted: !$("cv-paste").hidden, job: $("job").value, company: $("company").value, model: $("model").value, at })); } catch (_) {}
+  try { sessionStorage.setItem("draft", JSON.stringify({ cv: cvText, cvFile, pasted: !$("cv-paste").hidden, job: $("job").value, company: $("company").value, model: $("model").value, at, review })); } catch (_) {}
 }
 function loadDraft() {
   try { return JSON.parse(sessionStorage.getItem("draft") || "null"); } catch (_) { return null; }
@@ -251,7 +338,7 @@ function loadDraft() {
 
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paintTheme);
 const draft = loadDraft();
-if (draft) { cvText = draft.cv || ""; cvFile = draft.cvFile || ""; }
+if (draft) { cvText = draft.cv || ""; cvFile = draft.cvFile || ""; review = draft.review || null; }
 fill();
 if (draft) {
   if (draft.pasted || (cvText && !cvFile)) { $("cv-paste").hidden = false; $("paste-toggle").setAttribute("aria-expanded", "true"); $("cv-text").value = cvText; }
