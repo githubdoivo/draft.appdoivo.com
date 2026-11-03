@@ -91,7 +91,8 @@ function cors(req, env) {
 // Who pays for this run. Today: the owner, by passcode. Later: an account with prepaid credits.
 async function account(req, env) {
   const pass = req.headers.get("x-passcode") || "";
-  if (pass && sameText(await sha256(pass), env.PASSCODE_HASH || "")) return "owner";
+  // Both sides hashed, so the comparison always takes the same time
+  if (pass && env.PASSCODE && sameText(await sha256(pass), await sha256(env.PASSCODE))) return "owner";
   return null;
 }
 

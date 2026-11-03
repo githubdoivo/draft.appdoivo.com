@@ -30,7 +30,7 @@ Anthropic console as a second lock.
 
 1. Create an API key at console.anthropic.com (its own key, so its spending shows on its own).
 2. In `worker/`: `npx wrangler kv namespace create JOB`, put the id in `wrangler.toml`, then
-   `npx wrangler secret put ANTHROPIC_API_KEY` and `npx wrangler secret put PASSCODE_HASH`
+   `npx wrangler secret put ANTHROPIC_API_KEY` and `npx wrangler secret put PASSCODE` (or add both in the Cloudflare dashboard)
    (the SHA-256 of the passcode), and `npm run deploy`.
 3. Route the worker to `job-api.appdoivo.com`.
 
