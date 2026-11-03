@@ -60,7 +60,7 @@ const valid = {
   3: () => true,
 };
 function go(n) {
-  at = n;
+  at = n; saveDraft();
   document.querySelectorAll(".machine .panel").forEach((p) => (p.hidden = +p.dataset.step !== n));
   document.querySelectorAll("#track li").forEach((li) => { const k = +li.dataset.for; li.classList.toggle("done", k < n); li.classList.toggle("now", k === n); });
   $("step-count").textContent = w.stepOf.replace("{n}", n);
@@ -126,6 +126,7 @@ async function take(file) {
     cvText = (await readUpload(file)).trim().slice(0, LIMIT["cv-text"]); cvFile = file.name;
     if (words(cvText) < 40) throw new Error("empty");
     status("cv-status", w.readOk.replace("{n}", words(cvText)).replace("{f}", file.name));
+    saveDraft();
     readCv(); refresh();
   } catch (_) { cvText = ""; readCv(); status("cv-status", w.readFail, true); refresh(); }
 }
@@ -139,9 +140,10 @@ $("paste-toggle").addEventListener("click", () => {
   if (!t.hidden) $("cv-text").focus();
 });
 let ct;
-$("cv-text").addEventListener("input", (e) => { cvText = e.target.value.trim(); cvFile = ""; refresh(); clearTimeout(ct); ct = setTimeout(readCv, 300); });
-$("job").addEventListener("input", () => { refresh(); clearTimeout(jt); jt = setTimeout(readJob, 300); });
-$("company").addEventListener("input", () => { refresh(); clearTimeout(jt); jt = setTimeout(readCompany, 300); });
+$("cv-text").addEventListener("input", (e) => { cvText = e.target.value.trim(); cvFile = ""; refresh(); saveDraft(); clearTimeout(ct); ct = setTimeout(readCv, 300); });
+$("job").addEventListener("input", () => { refresh(); saveDraft(); clearTimeout(jt); jt = setTimeout(readJob, 300); });
+$("company").addEventListener("input", () => { refresh(); saveDraft(); clearTimeout(jt); jt = setTimeout(readCompany, 300); });
+$("model").addEventListener("change", saveDraft);
 
 // ---- options ----
 $("swatches").addEventListener("click", (e) => {
@@ -238,5 +240,26 @@ document.querySelectorAll("[data-dl]").forEach((b) => b.addEventListener("click"
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }));
 
+// The work in progress survives a reload of this tab (sessionStorage), and is forgotten
+// when the tab closes, so a CV never stays behind on a shared device.
+function saveDraft() {
+  try { sessionStorage.setItem("draft", JSON.stringify({ cv: cvText, cvFile, pasted: !$("cv-paste").hidden, job: $("job").value, company: $("company").value, model: $("model").value, at })); } catch (_) {}
+}
+function loadDraft() {
+  try { return JSON.parse(sessionStorage.getItem("draft") || "null"); } catch (_) { return null; }
+}
+
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paintTheme);
-fill(); go(1);
+const draft = loadDraft();
+if (draft) { cvText = draft.cv || ""; cvFile = draft.cvFile || ""; }
+fill();
+if (draft) {
+  if (draft.pasted || (cvText && !cvFile)) { $("cv-paste").hidden = false; $("paste-toggle").setAttribute("aria-expanded", "true"); $("cv-text").value = cvText; }
+  $("job").value = draft.job || ""; $("company").value = draft.company || "";
+  if (draft.model && [...$("model").options].some((o) => o.value === draft.model)) $("model").value = draft.model;
+  readCv(); readJob(); readCompany();
+}
+// Back to the step it was on, but never past a step that is not valid
+let start = 1;
+while (draft && start < Math.min(draft.at || 1, 4) && valid[start]()) start++;
+go(start);

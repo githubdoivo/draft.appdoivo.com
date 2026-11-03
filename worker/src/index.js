@@ -143,6 +143,8 @@ export default {
         ...fallback,
       });
     } catch (e) {
+      // What the API said (type and message only: never the key or the CV)
+      console.error("ai_error", e?.status, e?.error?.error?.type, e?.error?.error?.message || e?.message);
       const status = e instanceof Anthropic.RateLimitError ? 429 : 502;
       return json({ error: "ai", detail: e?.status || "" }, status, h);
     }

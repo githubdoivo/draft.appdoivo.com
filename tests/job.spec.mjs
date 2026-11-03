@@ -151,3 +151,24 @@ test("the machine: one step at a time, Back keeps what was typed, limits are sho
   await expect(page.locator("#cv-text")).toHaveValue(CV);
   await expect(page.locator("#next")).toBeEnabled();
 });
+
+test("a reload keeps the CV, the job, the company and the step (this tab only)", async ({ page }) => {
+  await page.goto("/?lang=en");
+  await page.locator("#paste-toggle").click();
+  await page.locator("#cv-text").fill(CV);
+  await page.locator("#next").click();
+  await page.locator("#job").fill("We need a QA automation engineer with Playwright and TypeScript. ".repeat(4));
+  await page.locator("#next").click();
+  await page.locator("#company").fill("We value care, craft, plain words and kind teams.");
+  await page.locator("#next").click();
+  await expect(page.locator("#tailor")).toBeVisible();
+  await page.reload();
+  await expect(page.locator("#tailor")).toBeVisible();                           // back on step 4
+  await expect(page.locator("#summary")).toContainText("A tailored CV and a cover letter");
+  await page.locator("#back").click();
+  await expect(page.locator("#company")).toHaveValue("We value care, craft, plain words and kind teams.");
+  await page.locator("#back").click();
+  await expect(page.locator("#job")).toHaveValue(/QA automation engineer/);
+  await page.locator("#back").click();
+  await expect(page.locator("#cv-text")).toHaveValue(/Alex Morgan/);
+});
