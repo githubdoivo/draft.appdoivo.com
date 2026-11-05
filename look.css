@@ -1,7 +1,7 @@
-/* Job, next look ("architect's desk"), from the ChatGPT design of 2026-11-05: pale drafting
+/* Job's look ("architect's desk"), from the ChatGPT design of 2026-11-05: pale drafting
    paper with a faint blueprint grid, graphite ink, one deep ink-blue accent, the machine as a
-   white sheet laid on the desk. Loaded only on the preview link (?look=next, see look.js), on
-   top of job.css. To ship: link this file always. --brass stays the accent's name. */
+   white sheet laid on the desk. Linked always, on top of
+   job.css. --brass stays the accent's name. */
 :root {
   --bg: #f3e9dd; --paper: #fdfbf8; --fg: #1f2023; --muted: #4f5359; --faint: #5f636a; --line: #e2dcd3; --edge: #cfc7bb;
   --brass: #123d6a; --brass-ink: #ffffff; --ok: #2e6b3f; --warn: #8a5f00; --bad: #a3262e;
