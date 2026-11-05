@@ -1,8 +1,8 @@
 # Found a security issue on job.appdoivo.com?
-# Please email mail@ivolopes.com with the details and I'll get back to you.
+# Please email mail@appdoivo.com with the details and I'll get back to you.
 # Thank you for reporting it responsibly.
 
-Contact: mailto:mail@ivolopes.com
+Contact: mailto:mail@appdoivo.com
 Expires: 2027-10-30T00:00:00.000Z
 Preferred-Languages: en, pt
 Canonical: https://job.appdoivo.com/.well-known/security.txt
