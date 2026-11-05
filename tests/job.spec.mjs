@@ -224,3 +224,27 @@ test("a job link is read for you; a page that cannot be read says so", async ({ 
   await expect(page.locator("#job-status")).toHaveText("That page could not be read. Open the ad and paste its text here instead.");
   await expect(page.locator("#next")).toBeDisabled();
 });
+
+/* ---------- phone frame (same as ivolopes.com) ---------- */
+test("nothing is pinned to the screen edges (iPhone Safari paints a solid band over it)", async ({ page }) => {
+  await page.goto("/");
+  const pinned = await page.evaluate(() => [...document.querySelectorAll("body *")].filter((el) => ["fixed", "sticky"].includes(getComputedStyle(el).position)).map((el) => el.id || el.className));
+  expect(pinned).toEqual([]);
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).overflowY)).toBe("hidden");
+});
+
+test("the window sits scrolled down by the strip above it, and the background covers past every edge", async ({ page }) => {
+  await page.goto("/");
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(160);
+  const top = await page.locator(".top").evaluate((el) => el.getBoundingClientRect().top);
+  expect(top).toBeGreaterThanOrEqual(0);
+  expect(top).toBeLessThan(40);
+  const vp = page.viewportSize();
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bg = await page.locator(".bg").evaluate((el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, img: getComputedStyle(el).backgroundImage }; });
+    expect(bg.top, scheme).toBeLessThanOrEqual(-150);
+    expect(bg.bottom, scheme).toBeGreaterThanOrEqual(vp.height);
+    expect(bg.img, scheme).not.toBe("none");
+  }
+});

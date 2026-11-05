@@ -62,7 +62,7 @@ const valid = {
   2: () => $("job").value.trim().length >= MIN.job && !isLink($("job").value),
   3: () => true,
 };
-function go(n) {
+function go(n, { first = false } = {}) {
   at = n; saveDraft();
   document.querySelectorAll(".machine .panel").forEach((p) => (p.hidden = +p.dataset.step !== n));
   document.querySelectorAll("#track li").forEach((li) => { const k = +li.dataset.for; li.classList.toggle("done", k < n); li.classList.toggle("now", k === n); });
@@ -74,7 +74,8 @@ function go(n) {
   refresh();
   panel(n).querySelector(".m-title").focus({ preventScroll: true });
   const box = $("form").getBoundingClientRect();
-  if (box.top < 0 || box.top > innerHeight * .4) $("form").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  // Moving between steps brings the machine into view; opening the page does not
+  if (!first && (box.top < 0 || box.top > innerHeight * .4)) $("form").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
 }
 function refresh() {
   $("next").disabled = !valid[at]?.();
@@ -349,4 +350,4 @@ if (draft) {
 // Back to the step it was on, but never past a step that is not valid
 let start = 1;
 while (draft && start < Math.min(draft.at || 1, 4) && valid[start]()) start++;
-go(start);
+go(start, { first: true });

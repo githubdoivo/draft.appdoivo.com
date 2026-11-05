@@ -19,8 +19,19 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; background: var(--bg); }
-body { margin: 0; background: var(--bg); color: var(--fg); font: 18px/1.55 var(--text); min-height: 100svh; display: flex; flex-direction: column;
+/* Phone frame, same as ivolopes.com: the window never scrolls; .page scrolls over a still
+   background (.bg) that reaches past every edge: a strip above the screen (--above) and below
+   Safari's bars (--below). frame.js keeps the window scrolled down by the strip, so the clock
+   sits on the background. Nothing is pinned to the top or bottom edge. */
+:root { --above: 160px; --below: 0px; }
+@media (pointer: coarse) { :root { --below: 120px; } }
+html { -webkit-text-size-adjust: 100%; background: var(--bg); overscroll-behavior-y: none; }
+html, body { height: 100%; overflow: hidden; }
+body { margin: 0; color: var(--fg); font: 18px/1.55 var(--text); }
+.bg, .page { position: absolute; top: 0; left: 0; right: 0; height: calc(100vh + var(--above) + var(--below)); height: calc(100lvh + var(--above) + var(--below)); }
+.bg { z-index: 0; background-color: var(--bg); background-image: radial-gradient(90% 60% at 0% 0%, var(--paper), transparent 70%), radial-gradient(80% 60% at 100% 100%, var(--line), transparent 70%); }
+.page { z-index: 1; padding-top: var(--above); overflow-x: hidden; overflow-y: auto; overscroll-behavior: none; }
+.shell { min-height: 100svh; display: flex; flex-direction: column; padding-bottom: calc(100lvh - 100svh + var(--below));
   padding-inline: max(20px, env(safe-area-inset-left)) max(20px, env(safe-area-inset-right)); }
 main, .top, .foot { width: 100%; max-width: 760px; margin-inline: auto; }
 main { flex: 1; padding-bottom: 56px; }
