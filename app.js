@@ -291,7 +291,10 @@ $("example").addEventListener("click", async () => {
 const files = {};
 async function show(r) {
   const box = $("result"); box.hidden = false;
-  $("result-note").textContent = r.sample ? w.sample : r.cached ? w.cached : r.cost ? w.cost.replace("{c}", r.cost).replace("{b}", r.balance || "") : "";
+  const note = $("result-note");
+  note.classList.toggle("sample-note", !!r.sample);
+  if (r.sample) { const b = document.createElement("strong"); b.textContent = w.sampleTitle; const s = document.createElement("span"); s.textContent = w.sampleText; note.replaceChildren(b, s); }
+  else note.textContent = r.cached ? w.cached : r.cost ? w.cost.replace("{c}", r.cost).replace("{b}", r.balance || "") : "";
   $("cv-preview").innerHTML = cvHtml(r.cv, colour);
   $("tab-letter").hidden = !r.letter;
   if (r.letter) $("letter-preview").innerHTML = letterHtml(r.letter, colour);

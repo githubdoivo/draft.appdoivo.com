@@ -66,7 +66,7 @@ test("downloads: PDF and Word with clean names, and the PDF reads back in order"
 test("colours: five, keyboard-reachable, and the CV follows the choice", async ({ page }) => {
   await page.goto("/?lang=en");
   await page.locator("#example").click();
-  await expect(page.locator(".swatch")).toHaveCount(5);
+  await expect(page.locator(".swatch")).toHaveCount(6);
   await page.locator('.swatch[data-c="green"]').click();
   await expect(page.locator(".paper").first()).toHaveAttribute("style", /#2e6b3f/);
   await page.locator('.swatch[data-c="green"]').press("ArrowRight");
