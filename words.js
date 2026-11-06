@@ -3,11 +3,11 @@
 export const WORDS = {
   en: {
     lang: "en", other: "PT", otherLabel: "Ver em português", toDark: "Dark Mode", toLight: "Light Mode",
-    title: "Draft · Your CV, Tailored to Every Job", brand: "Draft", tagline: "Your CV, Tailored to Every Job",
+    title: "draftdoivo · Your CV, Tailored to Every Job", brand: "draftdoivo", tagline: "Your CV, Tailored to Every Job",
     intro: "Your CV and a job ad in; a CV shaped to that job out, ready for applicant tracking systems. Nothing is invented.",
     stepCv: "Your CV", choose: "Upload Your CV", drop: "or drop the file here", pasteInstead: "Paste Text Instead", cvHint: "PDF or Word. It stays on this device until you tailor it.", change: "Change",
     readOk: "Read {n} words from {f}", readFail: "That file could not be read. Try a PDF or Word file, or paste the text.", cvPaste: "Paste the CV text here",
-    stepJob: "The Job", jobPh: "Paste the job ad, or a link to it", jobHint: "Paste a link from LinkedIn or most job sites: Draft fills this step and the company step for you. Check both, change anything, then continue.", linkBoth: "Job and company both read from the link.", linkReading: "Reading the ad from the link…", linkOk: "Read from {h}: the job is below and the company is in the next step. Check, edit, then continue.", linkFail: "That page could not be read. Open the ad and paste its text here instead.", stepCompany: "About the Company", optional: "Optional",
+    stepJob: "The Job", jobPh: "Paste the job ad, or a link to it", jobHint: "Paste a link from LinkedIn or most job sites: draftdoivo fills this step and the company step for you. Check both, change anything, then continue.", linkBoth: "Job and company both read from the link.", linkReading: "Reading the ad from the link…", linkOk: "Read from {h}: the job is below and the company is in the next step. Check, edit, then continue.", linkFail: "That page could not be read. Open the ad and paste its text here instead.", stepCompany: "About the Company", optional: "Optional",
     companyHint: "Values, mission, what they care about. With this, a cover letter is written too.", companyPh: "Paste the company's values or About page here",
     colour: "Colour", colours: { purple: "Purple", blue: "Blue", red: "Red", green: "Green", yellow: "Yellow", graphite: "Graphite" },
     model: "AI Model", models: { haiku: "Haiku · Fastest", sonnet: "Sonnet · Recommended", opus: "Opus · Best Writing" },
@@ -39,11 +39,11 @@ export const WORDS = {
   },
   pt: {
     lang: "pt", other: "EN", otherLabel: "View in English", toDark: "Modo Escuro", toLight: "Modo Claro",
-    title: "Draft · O CV à Medida de Cada Vaga", brand: "Draft", tagline: "O CV à Medida de Cada Vaga",
+    title: "draftdoivo · O CV à Medida de Cada Vaga", brand: "draftdoivo", tagline: "O CV à Medida de Cada Vaga",
     intro: "Entra o CV e o anúncio de uma vaga; sai um CV moldado a essa vaga, pronto para os sistemas de recrutamento (ATS). Nada é inventado.",
     stepCv: "O CV", choose: "Carregar o CV", drop: "ou largar o ficheiro aqui", pasteInstead: "Colar Texto", cvHint: "PDF ou Word. Fica neste dispositivo até ser adaptado.", change: "Mudar",
     readOk: "{n} palavras lidas de {f}", readFail: "Não foi possível ler esse ficheiro. Experimentar um PDF ou Word, ou colar o texto.", cvPaste: "Colar aqui o texto do CV",
-    stepJob: "A Vaga", jobPh: "Colar o anúncio da vaga, ou o link", jobHint: "Cole um link do LinkedIn ou da maioria dos sites de emprego: o Draft preenche este passo e o da empresa. Confirme os dois, mude o que quiser e continue.", linkBoth: "Vaga e empresa lidas do link.", linkReading: "A ler o anúncio a partir do link…", linkOk: "Lido de {h}: a vaga está aqui e a empresa no passo seguinte. Confirme, edite e continue.", linkFail: "Não foi possível ler essa página. Abrir o anúncio e colar aqui o texto.", stepCompany: "Sobre a Empresa", optional: "Opcional",
+    stepJob: "A Vaga", jobPh: "Colar o anúncio da vaga, ou o link", jobHint: "Cole um link do LinkedIn ou da maioria dos sites de emprego: o draftdoivo preenche este passo e o da empresa. Confirme os dois, mude o que quiser e continue.", linkBoth: "Vaga e empresa lidas do link.", linkReading: "A ler o anúncio a partir do link…", linkOk: "Lido de {h}: a vaga está aqui e a empresa no passo seguinte. Confirme, edite e continue.", linkFail: "Não foi possível ler essa página. Abrir o anúncio e colar aqui o texto.", stepCompany: "Sobre a Empresa", optional: "Opcional",
     companyHint: "Valores, missão, o que importa à empresa. Com isto, também é escrita uma carta de apresentação.", companyPh: "Colar aqui os valores ou a página Sobre da empresa",
     colour: "Cor", colours: { purple: "Roxo", blue: "Azul", red: "Vermelho", green: "Verde", yellow: "Amarelo", graphite: "Grafite" },
     model: "Modelo de IA", models: { haiku: "Haiku · Mais Rápido", sonnet: "Sonnet · Recomendado", opus: "Opus · Melhor Escrita" },
