@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { unstable_dev } from "wrangler";
 
 const PASS = "test-passcode-only-here";
-const SITE = "https://job.appdoivo.com";
+const SITE = "https://type.appdoivo.com";
 let w;
 // Local storage survives between runs, so each run (and the lockout test) uses its own address
 const RUN_IP = `198.51.100.${Math.floor(Math.random() * 250) + 1}`;

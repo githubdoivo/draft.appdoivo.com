@@ -1,5 +1,5 @@
 {
-  "name": "job.appdoivo.com",
+  "name": "type.appdoivo.com",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -8,16 +8,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/githubdoivo/job.appdoivo.com.git"
+    "url": "git+https://github.com/githubdoivo/type.appdoivo.com.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "bugs": {
-    "url": "https://github.com/githubdoivo/job.appdoivo.com/issues"
+    "url": "https://github.com/githubdoivo/type.appdoivo.com/issues"
   },
-  "homepage": "https://github.com/githubdoivo/job.appdoivo.com#readme",
+  "homepage": "https://github.com/githubdoivo/type.appdoivo.com#readme",
   "private": "true",
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",
