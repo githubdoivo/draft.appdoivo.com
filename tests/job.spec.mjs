@@ -237,6 +237,29 @@ test("a job link is read for you; a page that cannot be read says so", async ({ 
   await expect(p2.locator("#next")).toBeDisabled();
 });
 
+test("after a tailored CV: interview prep from the CV, and the job saved in My Applications on this device", async ({ page }) => {
+  await page.route(API, async (route) => {
+    if (route.request().url().endsWith("/interview")) return route.fulfill({ status: 200, json: { questions: [{ question: "Tell us about your test automation.", why: "The role is about Playwright.", answer: "At Northwind I built the Playwright suite." }], ask: ["How do you release?"], thanks: { subject: "Thank you", body: "Dear [Name], thank you." }, cost: "$0.003", balance: "$4.75" } });
+    route.fulfill({ status: 200, json: await answer(page) });
+  });
+  await page.goto("/?lang=en");
+  await page.evaluate(() => localStorage.removeItem("applications"));
+  await fillForm(page);
+  await page.locator("#tailor").click();
+  await page.locator("#pass").fill("right");
+  await page.locator("#pass-form button").click();
+  await expect(page.locator("#apps")).toBeVisible();
+  await expect(page.locator("#app-list li")).toHaveCount(1);
+  await page.locator("#app-list select").selectOption("applied");
+  await page.locator("#tab-interview").click();
+  await page.locator("#prep").click();
+  await expect(page.locator("#prep-out details.q")).toHaveCount(1);
+  await expect(page.locator("#prep-out")).toContainText("How do you release?");
+  await page.reload();
+  await expect(page.locator("#app-list li")).toHaveCount(1);
+  await expect(page.locator("#app-list select")).toHaveValue("applied");
+});
+
 /* ---------- phone frame (same as ivolopes.com) ---------- */
 test("nothing is pinned to the screen edges (iPhone Safari paints a solid band over it)", async ({ page }) => {
   await page.goto("/");

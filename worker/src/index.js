@@ -89,6 +89,16 @@ ALSO RETURN
 - notes.changes: 2 to 5 short sentences on what you changed and why.
 - notes.gaps: the ad's requirements the CV does not show (empty when none).`;
 
+// Interview prep for one job: likely questions, answers built only from the CV, questions to ask, a thank-you note
+const INTERVIEW_SCHEMA = obj({
+  questions: list({ question: str, why: str, answer: str }),
+  ask: strs,
+  thanks: obj({ subject: str, body: str }),
+});
+const INTERVIEW_SYSTEM = `You prepare a candidate for an interview for one job. Write every sentence in the interface language given; keep the ad's own terms as they are.
+- 8 likely questions for THIS role and company, mixing the role's core skills, behaviour (STAR) and motivation. For each: why they ask it (one short line), and a spoken answer of 3-6 sentences built ONLY from facts in the CV. Never invent employers, numbers, tools, results or dates. Where the CV has no evidence, say honestly how to answer (e.g. what to learn, a related experience) instead of making it up.
+- 5 smart questions the candidate can ask them, specific to this ad.
+- A short, warm thank-you email to send after the interview (subject and body, no placeholders except [Name] for the interviewer).`;
 const REVIEW_SYSTEM = `You check how well a CV matches one job ad, before a tailored CV is written. Be honest, specific and brief. Write every sentence in the interface language given; keep the ad's own terms as they are.
 - role and company: from the ad (empty string if not named).
 - score: 0 to 100, how much of what the ad requires the CV truthfully shows. Do not flatter.
@@ -182,7 +192,7 @@ export default {
     const h = cors(req, env);
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: h });
     const url = new URL(req.url);
-    if (!["/tailor", "/review", "/job"].includes(url.pathname) || req.method !== "POST") return json({ error: "not_found" }, 404, h);
+    if (!["/tailor", "/review", "/job", "/interview"].includes(url.pathname) || req.method !== "POST") return json({ error: "not_found" }, 404, h);
     if (Number(req.headers.get("content-length") || 0) > 200_000) return json({ error: "too_large" }, 413, h);
 
     // Ten wrong passcodes from one address lock it out for an hour
@@ -206,7 +216,8 @@ export default {
 
     const cv = clean(input.cv, LIMITS.cv), job = clean(input.job, LIMITS.job), company = clean(input.company, LIMITS.company);
     if (cv.length < 200 || job.length < 80) return json({ error: "too_short" }, 400, h);
-    const review = url.pathname === "/review";
+    const interview = url.pathname === "/interview";
+    const review = url.pathname === "/review" || interview;   // interview runs like review: Haiku, low effort
     const ui = input.ui === "pt" ? "pt" : "en";
     const model = review ? "haiku" : MODELS[input.model] ? input.model : "sonnet";
     // What the candidate decided on the review board
@@ -229,7 +240,7 @@ export default {
     const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
     let user = `Today's date: ${today}\n\n<cv>\n${cv}\n</cv>\n\n<job_ad>\n${job}\n</job_ad>\n\n` +
       (company ? `<company>\n${company}\n</company>` : "<company>(none: leave the letter empty)</company>");
-    if (review) user = `Interface language: ${ui === "pt" ? "European Portuguese" : "British English"}\n\n<cv>\n${cv}\n</cv>\n\n<job_ad>\n${job}\n</job_ad>`;
+    if (review) user = `Interface language: ${ui === "pt" ? "European Portuguese" : "British English"}\n\n<cv>\n${cv}\n</cv>\n\n<job_ad>\n${job}\n</job_ad>` + (interview && company ? `\n\n<company>\n${company}\n</company>` : "");
     else if (choices.confirmed.length || choices.apply.length || choices.skip.length) {
       user += "\n\n<candidate_choices>" +
         (choices.confirmed.length ? `\nThe candidate confirms these are true (not in the CV text; include them only where they fit):\n${choices.confirmed.map((x) => `- ${x.term}${x.note ? `: ${x.note}` : ""}`).join("\n")}` : "") +
@@ -239,11 +250,11 @@ export default {
     }
 
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-    const m = MODELS[model], schema = review ? REVIEW_SCHEMA : SCHEMA;
+    const m = MODELS[model], schema = interview ? INTERVIEW_SCHEMA : review ? REVIEW_SCHEMA : SCHEMA;
     // Sonnet and Opus: if a safety filter ever declines, the API retries on a suitable model by itself
     const fallback = model === "haiku" ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" };
     const ask = (strict) => client.beta.messages.create({
-      model: m.id, max_tokens: review ? 3000 : 16000, system: review ? REVIEW_SYSTEM : SYSTEM,
+      model: m.id, max_tokens: interview ? 6000 : review ? 3000 : 16000, system: interview ? INTERVIEW_SYSTEM : review ? REVIEW_SYSTEM : SYSTEM,
       messages: [{ role: "user", content: strict ? user : `${user}\n\nReply with only one JSON object, no other text, following this JSON schema:\n${JSON.stringify(schema)}` }],
       output_config: strict ? { effort: review ? "low" : "medium", format: { type: "json_schema", schema } } : { effort: review ? "low" : "medium" },
       ...fallback,
@@ -272,7 +283,9 @@ export default {
     const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("");
     let out;
     try { out = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)); } catch (_) { return json({ error: "parse", ...paid }, 502, h); }
-    if (review) {
+    if (interview) {
+      if (!Array.isArray(out?.questions) || !out.questions.length) return json({ error: "parse", ...paid }, 502, h);
+    } else if (review) {
       if (!Array.isArray(out?.have)) return json({ error: "parse", ...paid }, 502, h);
       out.score = Math.max(0, Math.min(100, Math.round(Number(out.score) || 0)));
     } else {

@@ -249,3 +249,26 @@ textarea#cv-text { margin-top: 12px; }
 .link-input input { flex: 1; min-width: 0; min-height: 46px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 10px; background: var(--field, var(--paper)); color: var(--fg); font: 15px var(--serif); }
 .link-input button { min-height: 46px; padding: 0 18px; }
 .f-label { display: block; margin: 0 0 6px; font: 500 13px var(--mono); letter-spacing: .04em; color: var(--muted); }
+/* interview prep */
+#panel-interview { display: grid; gap: 12px; }
+#prep { justify-self: start; }
+#prep-out { display: grid; gap: 10px; }
+#prep-out details.q { border: 1px solid var(--edge); border-radius: 12px; padding: 4px 14px; background: var(--paper); }
+#prep-out details.q summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font: 600 16px var(--serif); }
+#prep-out .why { color: var(--muted); font-size: 14px; margin: 0 0 6px; }
+#prep-out .ans { margin: 0 0 12px; line-height: 1.55; }
+#prep-out h3 { margin: 14px 0 4px; }
+#prep-out .thanks { border-left: 3px solid var(--brass); padding: 4px 14px; white-space: pre-wrap; }
+#prep-out .subj { font-weight: 600; }
+/* my applications */
+.apps { margin-top: 36px; display: grid; gap: 10px; }
+.app-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.app { border: 1px solid var(--edge); border-left: 4px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--paper); display: grid; gap: 8px; }
+.app.st-applied { border-left-color: var(--brass); } .app.st-interview { border-left-color: #6aa0d8; } .app.st-offer { border-left-color: #4caf7d; } .app.st-no { opacity: .7; }
+.app-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.app-head .co, .app-head .date { color: var(--muted); font-size: 14px; }
+.app-head .date { margin-left: auto; font-family: var(--mono); font-size: 12.5px; }
+.app-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.app-row select, .app-row input { min-height: 40px; border: 1px solid var(--edge); border-radius: 8px; background: transparent; color: var(--fg); padding: 0 8px; font: inherit; }
+.follow { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.link-btn { background: none; border: 0; color: var(--muted); text-decoration: underline; min-height: 44px; cursor: pointer; font: inherit; font-size: 13px; }

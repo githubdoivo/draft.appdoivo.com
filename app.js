@@ -25,6 +25,7 @@ let review = null;                                       // { key, score, have, 
 // ---- words ----
 function fill() {
   w = WORDS[lang];
+  if (typeof renderApps === "function") try { renderApps(); } catch (_) {}
   document.documentElement.lang = lang;
   document.title = w.title;
   document.querySelectorAll("[data-w]").forEach((el) => (el.textContent = w[el.dataset.w]));
@@ -312,6 +313,8 @@ $("example").addEventListener("click", async () => {
 const files = {};
 async function show(r) {
   const box = $("result"); box.hidden = false;
+  $("prep-out").replaceChildren(); $("prep-status").textContent = ""; $("tab-interview").hidden = !!r.sample;
+  if (!r.sample) track(r);
   const note = $("result-note");
   note.classList.toggle("sample-note", !!r.sample);
   if (r.sample) { const b = document.createElement("strong"); b.textContent = w.sampleTitle; const s = document.createElement("span"); s.textContent = w.sampleText; note.replaceChildren(b, s); }
@@ -336,13 +339,16 @@ async function show(r) {
   box.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
 }
 function selectTab(which) {
-  for (const t of ["cv", "letter"]) { $(`tab-${t}`).setAttribute("aria-selected", String(t === which)); $(`panel-${t}`).hidden = t !== which; }
+  for (const t of ["cv", "letter", "interview"]) { $(`tab-${t}`).setAttribute("aria-selected", String(t === which)); $(`panel-${t}`).hidden = t !== which; }
 }
 $("tab-cv").addEventListener("click", () => selectTab("cv"));
 $("tab-letter").addEventListener("click", () => selectTab("letter"));
+$("tab-interview").addEventListener("click", () => selectTab("interview"));
 document.querySelector(".tabs").addEventListener("keydown", (e) => {
   if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-  const next = $("tab-cv").getAttribute("aria-selected") === "true" && !$("tab-letter").hidden ? "letter" : "cv";
+  const order = ["cv", "letter", "interview"].filter((t) => !$(`tab-${t}`).hidden);
+  const cur = order.findIndex((t) => $(`tab-${t}`).getAttribute("aria-selected") === "true");
+  const next = order[(cur + (e.key === "ArrowRight" ? 1 : order.length - 1)) % order.length];
   selectTab(next); $(`tab-${next}`).focus();
 });
 document.querySelectorAll("[data-dl]").forEach((b) => b.addEventListener("click", async () => {
@@ -375,3 +381,46 @@ if (draft) {
 let start = 1;
 while (draft && start < Math.min(draft.at || 1, 4) && valid[start]()) start++;
 go(start, { first: true });
+
+// ---- interview prep: likely questions answered from the CV, questions to ask, a thank-you note ----
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+$("prep").addEventListener("click", async () => {
+  const b = $("prep"); b.disabled = true; $("prep-status").textContent = w.prepping;
+  try {
+    const d = await api("/interview", { ...inputs(), ui: lang });
+    if (!d) { $("prep-status").textContent = ""; return; }
+    $("prep-status").textContent = d.cached ? w.cached : w.prepCost.replace("{c}", d.cost || "");
+    const out = [];
+    for (const q of d.questions || []) { const det = el("details", "q"); det.append(el("summary", null, q.question), el("p", "why", `${w.qWhy}: ${q.why}`), el("p", "ans", q.answer)); out.push(det); }
+    if (d.ask?.length) { const h = el("h3", null, w.askTitle), ul = el("ul", "ask"); for (const a of d.ask) ul.append(el("li", null, a)); out.push(h, ul); }
+    if (d.thanks?.body) { const h = el("h3", null, w.thanksTitle), box = el("div", "thanks"); box.append(el("p", "subj", d.thanks.subject), el("p", null, d.thanks.body));
+      const c = el("button", "btn ghost", w.copy); c.type = "button"; c.onclick = async () => { try { await navigator.clipboard.writeText(`${d.thanks.subject}\n\n${d.thanks.body}`); c.textContent = w.copied; } catch (_) {} };
+      out.push(h, box, c); }
+    $("prep-out").replaceChildren(...out);
+  } catch (err) { $("prep-status").textContent = sayError(err); }
+  b.disabled = false;
+});
+
+// ---- my applications: kept on this device only ----
+const APPS_KEY = "applications";
+const appsGet = () => { try { return JSON.parse(store.get(APPS_KEY) || "[]"); } catch (_) { return []; } };
+const appsSet = (list) => store.set(APPS_KEY, JSON.stringify(list.slice(0, 200)));
+function track(r) {
+  const role = (r.cv?.title || $("job").value.split(/\n|·/)[0] || "").trim().slice(0, 80), company = (r.letter?.company || $("company").value.split("\n")[0] || "").trim().slice(0, 60);
+  const list = appsGet(); const key = `${role}|${company}`.toLowerCase();
+  if (!list.some((a) => a.key === key)) { list.unshift({ key, role, company, date: new Date().toISOString().slice(0, 10), status: "tailored", follow: "" }); appsSet(list); }
+  renderApps();
+}
+function renderApps() {
+  const list = appsGet(); $("apps").hidden = !list.length;
+  const ST = ["tailored", "applied", "interview", "offer", "no"], NAME = { tailored: w.stTailored, applied: w.stApplied, interview: w.stInterview, offer: w.stOffer, no: w.stNo };
+  $("app-list").replaceChildren(...list.map((a, i) => {
+    const li = el("li", "app st-" + a.status); const head = el("div", "app-head");
+    head.append(el("b", null, a.role || "—"), el("span", "co", a.company || ""), el("span", "date", new Date(a.date + "T12:00:00").toLocaleDateString(lang === "pt" ? "pt-PT" : "en-GB", { day: "numeric", month: "short" })));
+    const sel = el("select"); sel.setAttribute("aria-label", a.role); for (const s of ST) { const o = el("option", null, NAME[s]); o.value = s; sel.append(o); } sel.value = a.status;
+    sel.onchange = () => { const l = appsGet(); l[i].status = sel.value; appsSet(l); renderApps(); };
+    const fl = el("label", "follow"); fl.append(el("span", null, w.followUp)); const fi = el("input"); fi.type = "date"; fi.value = a.follow || ""; fi.onchange = () => { const l = appsGet(); l[i].follow = fi.value; appsSet(l); }; fl.append(fi);
+    const rm = el("button", "link-btn", w.remove); rm.type = "button"; rm.onclick = () => { const l = appsGet(); l.splice(i, 1); appsSet(l); renderApps(); };
+    const row = el("div", "app-row"); row.append(sel, fl, rm); li.append(head, row); return li; }));
+}
+renderApps();
