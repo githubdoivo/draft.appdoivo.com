@@ -178,8 +178,8 @@ async function readLink(u) {
     if (!$("company").value.trim()) $("company").value = aboutCompany(d.text || "", d.company || "");
     status("job-status", "✓ " + w.linkOk.replace("{h}", new URL(u).hostname.replace(/^www\./, "")));
     readJob(); readCompany(); refresh(); saveDraft();
-    // straight to Review: both steps are filled (they can still be opened and changed)
-    if (valid[1]() && valid[2]()) { linkFilled = true; go(4); }
+    // both steps are filled from the link; you stay here to check the job, then Continue shows the company filled too
+    linkFilled = true;
   } catch (err) { status("job-status", err.say && err.say !== w.failed ? err.say : w.linkFail, true); }
 }
 $("company").addEventListener("input", () => { refresh(); saveDraft(); clearTimeout(jt); jt = setTimeout(readCompany, 300); });

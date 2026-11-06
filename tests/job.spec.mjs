@@ -217,18 +217,22 @@ test("a job link is read for you; a page that cannot be read says so", async ({ 
   await page.locator("#next").click();
   await page.locator("#job").fill("https://www.linkedin.com/jobs/view/4481307816/");
   await expect(page.locator("#job")).toHaveValue(/^QA Engineer · Northwind\n\nWe need/);
-  // one link fills the job and the company, and goes straight to Review
+  // one link fills the job here and the company in the next step; nothing is skipped
+  await expect(page.locator("#job-status")).toContainText("Read from linkedin.com");
   await expect(page.locator("#company")).toHaveValue(/^Northwind/);
-  await expect(page.locator("#summary")).toContainText("Both read from the link");
-  ok = false;
-  await page.evaluate(() => sessionStorage.removeItem("draft"));
-  await page.goto("/?lang=en");
-  await page.locator("#paste-toggle").click();
-  await page.locator("#cv-text").fill(CV);
   await page.locator("#next").click();
-  await page.locator("#job").fill("https://example.com/careers/42");
-  await expect(page.locator("#job-status")).toHaveText("That page could not be read. Open the ad and paste its text here instead.");
-  await expect(page.locator("#next")).toBeDisabled();
+  await expect(page.locator("#company")).toBeVisible();
+  ok = false;
+  // a fresh tab (no saved draft) for the page that cannot be read
+  const p2 = await page.context().newPage();
+  await p2.route(API, (route) => route.fulfill({ status: 422, json: { error: "unreadable" } }));
+  await p2.goto("/?lang=en");
+  await p2.locator("#paste-toggle").click();
+  await p2.locator("#cv-text").fill(CV);
+  await p2.locator("#next").click();
+  await p2.locator("#job").fill("https://example.com/careers/42");
+  await expect(p2.locator("#job-status")).toHaveText("That page could not be read. Open the ad and paste its text here instead.");
+  await expect(p2.locator("#next")).toBeDisabled();
 });
 
 /* ---------- phone frame (same as ivolopes.com) ---------- */
