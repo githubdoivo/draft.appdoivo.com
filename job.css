@@ -233,12 +233,9 @@ textarea#cv-text { margin-top: 12px; }
 .sugg input { width: 20px; height: 20px; margin: 3px 0 0; accent-color: var(--brass); flex: none; }
 @media (prefers-reduced-motion: reduce) { .ask input, .ask input::after { transition: none; } .working::after { animation: none; } }
 
-/* steps: each name in its own tab, the current one clearly marked (2026-11-05 feedback) */
-.m-track { gap: 8px; }
-.m-track li { gap: 0; padding: 8px 6px 7px; border-radius: 10px; background: color-mix(in srgb, var(--line) 45%, transparent); text-align: center; font-size: 13px; position: relative; overflow: hidden; }
-.m-track li::before { position: absolute; left: 0; right: 0; top: 0; height: 3px; border-radius: 0; }
-.m-track li.now { background: var(--paper); color: var(--fg); font-weight: 600; box-shadow: 0 0 0 1px var(--brass) inset; }
-.m-track li.done { background: color-mix(in srgb, var(--brass) 12%, transparent); }
+/* steps: back to the thin line above each name that changes colour (2026-11-06 feedback); names a touch apart */
+.m-track { gap: 10px; }
+.m-track li.now { font-weight: 600; }
 .m-count { flex-basis: 100%; }
 /* the example: a clear banner instead of a lost line */
 .sample-note { display: grid; gap: 2px; padding: 12px 16px; border: 1px dashed var(--edge); border-left: 4px solid var(--brass); border-radius: 12px; background: color-mix(in srgb, var(--paper) 70%, transparent); color: var(--fg); margin: 0 0 18px; }
