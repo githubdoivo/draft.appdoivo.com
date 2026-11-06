@@ -121,7 +121,7 @@ function summary() {
   const job = $("job").value.trim(), company = $("company").value.trim().length >= 40;
   $("summary").innerHTML = `<dt>${esc(w.sumCv)}</dt><dd>${esc(cvFile || w.pasted)} · ${esc(w.sumWords.replace("{n}", words(cvText)))}</dd>
     <dt>${esc(w.sumJob)}</dt><dd>${esc(job.split(/\n|\. /)[0].slice(0, 80))}<span class="chips">${chips(keywords(job, 5))}</span></dd>
-    <dt>${esc(w.sumOut)}</dt><dd>${esc(company ? w.outBoth : w.outCv)}</dd>`;
+    <dt>${esc(w.sumOut)}</dt><dd>${esc(company ? w.outBoth : w.outCv)}</dd>${linkFilled ? `<dt></dt><dd class="hint">${esc(w.linkBoth)}</dd>` : ""}`;
 }
 
 // ---- step 1: the CV, uploaded, dropped or pasted ----
@@ -156,14 +156,30 @@ $("job").addEventListener("input", () => {
   refresh(); saveDraft(); clearTimeout(jt); jt = setTimeout(readJob, 300);
   clearTimeout(lt); if (isLink($("job").value)) lt = setTimeout(() => readLink($("job").value.trim()), 400); else status("job-status", w.jobHint);
 });
+// The company part of a job ad: the "About us / Who we are" section, else the company's name and the ad's opening
+let linkFilled = false;
+function aboutCompany(text, name) {
+  const lines = text.split(/\n+/).map((x) => x.trim()).filter(Boolean);
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const start = lines.findIndex((l) => new RegExp(`^(about (us|the company|the team${name ? "|" + esc : ""})|who we are|our (company|story|mission)|sobre (nós|a empresa${name ? "|a " + esc + "|o " + esc : ""})|quem somos)\\b`, "i").test(l) && l.length < 80);
+  const stop = /^(responsibilities|requirements|what you('ll)?|your role|the role|qualifications|benefits|perks|how to apply|o que|requisitos|responsabilidades|funções|benefícios|perfil)\b/i;
+  let out = [];
+  if (start >= 0) { for (const l of lines.slice(start + 1)) { if (stop.test(l) && l.length < 60) break; out.push(l); if (out.join(" ").length > 1500) break; } }
+  if (out.join(" ").length < 60) out = lines.filter((l) => name && l.toLowerCase().includes(name.toLowerCase())).slice(0, 3);
+  return [name, ...out].filter(Boolean).join("\n\n").slice(0, 2000);
+}
 async function readLink(u) {
   status("job-status", w.linkReading);
   try {
     const d = await api("/job", { url: u });
     if (!d || $("job").value.trim() !== u) return status("job-status", w.jobHint);   // cancelled, or the box changed meanwhile
     $("job").value = `${[d.title, d.company].filter(Boolean).join(" · ")}\n\n${d.text}`.trim();
+    // one link fills both steps: the ad, and the company (its "About us" part, or its name and opening)
+    if (!$("company").value.trim()) $("company").value = aboutCompany(d.text || "", d.company || "");
     status("job-status", "✓ " + w.linkOk.replace("{h}", new URL(u).hostname.replace(/^www\./, "")));
-    readJob(); refresh(); saveDraft();
+    readJob(); readCompany(); refresh(); saveDraft();
+    // straight to Review: both steps are filled (they can still be opened and changed)
+    if (valid[1]() && valid[2]()) { linkFilled = true; go(4); }
   } catch (err) { status("job-status", err.say && err.say !== w.failed ? err.say : w.linkFail, true); }
 }
 $("company").addEventListener("input", () => { refresh(); saveDraft(); clearTimeout(jt); jt = setTimeout(readCompany, 300); });

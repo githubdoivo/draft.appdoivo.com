@@ -217,9 +217,15 @@ test("a job link is read for you; a page that cannot be read says so", async ({ 
   await page.locator("#next").click();
   await page.locator("#job").fill("https://www.linkedin.com/jobs/view/4481307816/");
   await expect(page.locator("#job")).toHaveValue(/^QA Engineer · Northwind\n\nWe need/);
-  await expect(page.locator("#job-status")).toHaveText("✓ Read from linkedin.com. Check it, then continue.");
-  await expect(page.locator("#next")).toBeEnabled();
+  // one link fills the job and the company, and goes straight to Review
+  await expect(page.locator("#company")).toHaveValue(/^Northwind/);
+  await expect(page.locator("#summary")).toContainText("Both read from the link");
   ok = false;
+  await page.evaluate(() => sessionStorage.removeItem("draft"));
+  await page.goto("/?lang=en");
+  await page.locator("#paste-toggle").click();
+  await page.locator("#cv-text").fill(CV);
+  await page.locator("#next").click();
   await page.locator("#job").fill("https://example.com/careers/42");
   await expect(page.locator("#job-status")).toHaveText("That page could not be read. Open the ad and paste its text here instead.");
   await expect(page.locator("#next")).toBeDisabled();
