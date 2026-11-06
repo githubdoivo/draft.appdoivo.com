@@ -162,6 +162,17 @@ $("job").addEventListener("input", () => {
 $("read-link").addEventListener("click", () => { const u = $("job-link").value.trim(); if (isLink(u)) readLink(u); else status("job-status", w.linkBad, true); });
 $("job-link").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("read-link").click(); } });
 $("job-link").addEventListener("paste", () => setTimeout(() => { const u = $("job-link").value.trim(); if (isLink(u)) readLink(u); }, 0));
+// Lines that are only about who to contact: emails, phone numbers, "contact / send your CV to"
+function stripContacts(text) {
+  const contacts = [], keep = [];
+  const EMAIL = /[\w.+-]+@[\w-]+\.[\w.]+/g, PHONE = /(\+?\d[\d\s().-]{7,}\d)/g;
+  for (const line of String(text || "").split("\n")) {
+    const found = [...(line.match(EMAIL) || []), ...(line.match(PHONE) || [])];
+    if (found.length || /^\s*(contact|contacto|recruiter|recrutador|send your (cv|resume)|envie o seu cv)\b/i.test(line)) { contacts.push(...(found.length ? found : [line.trim()])); continue; }
+    keep.push(line);
+  }
+  return { text: keep.join("\n").replace(/\n{3,}/g, "\n\n").trim(), contacts: [...new Set(contacts)].slice(0, 4) };
+}
 // The company part of a job ad: the "About us / Who we are" section, else the company's name and the ad's opening
 let linkFilled = false;
 function aboutCompany(text, name) {
@@ -179,9 +190,12 @@ async function readLink(u) {
   try {
     const d = await api("/job", { url: u });
     if (!d || $("job-link").value.trim() !== u) return status("job-status", w.jobHint);   // cancelled, or the link changed meanwhile
-    $("job").value = `${[d.title, d.company].filter(Boolean).join(" · ")}\n\n${d.text}`.trim();
+    // contact details (emails, phone numbers, "contact X") are not part of the job: kept aside, not sent to the AI
+    const { text: jobText, contacts } = stripContacts(d.text);
+    $("job").value = `${[d.title, d.company].filter(Boolean).join(" · ")}\n\n${jobText}`.trim();
+    $("contacts").hidden = !contacts.length; $("contacts").textContent = contacts.length ? w.contactsKept.replace("{c}", contacts.join(" · ")) : "";
     // one link fills both steps: the ad, and the company (its "About us" part, or its name and opening)
-    if (!$("company").value.trim()) $("company").value = aboutCompany(d.text || "", d.company || "");
+    if (!$("company").value.trim()) $("company").value = aboutCompany(jobText, d.company || "");
     status("job-status", "✓ " + w.linkOk.replace("{h}", new URL(u).hostname.replace(/^www\./, "")));
     readJob(); readCompany(); refresh(); saveDraft();
     // both steps are filled from the link; you stay here to check the job, then Continue shows the company filled too

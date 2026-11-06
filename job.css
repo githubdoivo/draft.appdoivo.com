@@ -272,3 +272,7 @@ textarea#cv-text { margin-top: 12px; }
 .app-row select, .app-row input { min-height: 40px; border: 1px solid var(--edge); border-radius: 8px; background: transparent; color: var(--fg); padding: 0 8px; font: inherit; }
 .follow { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .link-btn { background: none; border: 0; color: var(--muted); text-decoration: underline; min-height: 44px; cursor: pointer; font: inherit; font-size: 13px; }
+.news { margin: 14px 0 0; padding: 10px 14px; border: 1px dashed var(--brass); border-radius: 12px; font-size: 15px; color: var(--muted); max-width: 62ch; }
+.news b { color: var(--brass); font: 600 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; margin-right: 6px; }
+.link-input .btn { min-width: 96px; }
+.contacts { font-size: 13.5px; }
