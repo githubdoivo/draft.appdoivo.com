@@ -215,7 +215,8 @@ test("a job link is read for you; a page that cannot be read says so", async ({ 
   await page.locator("#paste-toggle").click();
   await page.locator("#cv-text").fill(CV);
   await page.locator("#next").click();
-  await page.locator("#job").fill("https://www.linkedin.com/jobs/view/4481307816/");
+  await page.locator("#job-link").fill("https://www.linkedin.com/jobs/view/4481307816/");
+  await page.locator("#read-link").click();
   await expect(page.locator("#job")).toHaveValue(/^QA Engineer · Northwind\n\nWe need/);
   // one link fills the job here and the company in the next step; nothing is skipped
   await expect(page.locator("#job-status")).toContainText("Read from linkedin.com");
@@ -230,8 +231,9 @@ test("a job link is read for you; a page that cannot be read says so", async ({ 
   await p2.locator("#paste-toggle").click();
   await p2.locator("#cv-text").fill(CV);
   await p2.locator("#next").click();
-  await p2.locator("#job").fill("https://example.com/careers/42");
-  await expect(p2.locator("#job-status")).toHaveText("That page could not be read. Open the ad and paste its text here instead.");
+  await p2.locator("#job-link").fill("https://example.com/careers/42");
+  await p2.locator("#read-link").click();
+  await expect(p2.locator("#job-status")).toContainText("didn't let draftdoivo read the ad");
   await expect(p2.locator("#next")).toBeDisabled();
 });
 

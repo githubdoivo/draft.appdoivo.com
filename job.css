@@ -243,3 +243,9 @@ textarea#cv-text { margin-top: 12px; }
 .sample-note span { color: var(--muted); }
 /* colours: 6, so a phone shows 3 above and 3 below */
 @media (max-width: 640px) { .swatches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); } .swatch { padding-right: 8px; } }
+/* the Job step: an optional link box on top, the ad's text below (2026-11-06) */
+.link-row { display: grid; gap: 6px; margin: 0 0 14px; font: 500 13px var(--mono); letter-spacing: .04em; color: var(--muted); }
+.link-input { display: flex; gap: 8px; }
+.link-input input { flex: 1; min-width: 0; min-height: 46px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 10px; background: var(--field, var(--paper)); color: var(--fg); font: 15px var(--serif); }
+.link-input button { min-height: 46px; padding: 0 18px; }
+.f-label { display: block; margin: 0 0 6px; font: 500 13px var(--mono); letter-spacing: .04em; color: var(--muted); }

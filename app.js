@@ -28,6 +28,7 @@ function fill() {
   document.documentElement.lang = lang;
   document.title = w.title;
   document.querySelectorAll("[data-w]").forEach((el) => (el.textContent = w[el.dataset.w]));
+  document.querySelectorAll("[data-w-placeholder]").forEach((el) => (el.placeholder = w[el.dataset.wPlaceholder] || ""));
   $("job").placeholder = w.jobPh; $("company").placeholder = w.companyPh; $("cv-text").placeholder = w.cvPaste;
   $("lang").textContent = w.other; $("lang").setAttribute("aria-label", `${w.other}: ${w.otherLabel}`);
   $("swatches").innerHTML = Object.keys(COLOURS).map((k) => `<button type="button" role="radio" class="swatch" data-c="${k}" aria-checked="${k === colour}" style="--sw:${COLOURS[k].hex}"><span>${w.colours[k]}</span></button>`).join("");
@@ -154,8 +155,12 @@ $("cv-text").addEventListener("input", (e) => { cvText = e.target.value.trim(); 
 let lt;
 $("job").addEventListener("input", () => {
   refresh(); saveDraft(); clearTimeout(jt); jt = setTimeout(readJob, 300);
-  clearTimeout(lt); if (isLink($("job").value)) lt = setTimeout(() => readLink($("job").value.trim()), 400); else status("job-status", w.jobHint);
+  // a link pasted into the text box moves to the link box and is read from there
+  if (isLink($("job").value)) { $("job-link").value = $("job").value.trim(); $("job").value = ""; readLink($("job-link").value); }
 });
+$("read-link").addEventListener("click", () => { const u = $("job-link").value.trim(); if (isLink(u)) readLink(u); else status("job-status", w.linkBad, true); });
+$("job-link").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("read-link").click(); } });
+$("job-link").addEventListener("paste", () => setTimeout(() => { const u = $("job-link").value.trim(); if (isLink(u)) readLink(u); }, 0));
 // The company part of a job ad: the "About us / Who we are" section, else the company's name and the ad's opening
 let linkFilled = false;
 function aboutCompany(text, name) {
@@ -172,7 +177,7 @@ async function readLink(u) {
   status("job-status", w.linkReading);
   try {
     const d = await api("/job", { url: u });
-    if (!d || $("job").value.trim() !== u) return status("job-status", w.jobHint);   // cancelled, or the box changed meanwhile
+    if (!d || $("job-link").value.trim() !== u) return status("job-status", w.jobHint);   // cancelled, or the link changed meanwhile
     $("job").value = `${[d.title, d.company].filter(Boolean).join(" · ")}\n\n${d.text}`.trim();
     // one link fills both steps: the ad, and the company (its "About us" part, or its name and opening)
     if (!$("company").value.trim()) $("company").value = aboutCompany(d.text || "", d.company || "");
@@ -180,7 +185,7 @@ async function readLink(u) {
     readJob(); readCompany(); refresh(); saveDraft();
     // both steps are filled from the link; you stay here to check the job, then Continue shows the company filled too
     linkFilled = true;
-  } catch (err) { status("job-status", err.say && err.say !== w.failed ? err.say : w.linkFail, true); }
+  } catch (err) { status("job-status", err.say && err.say !== w.failed ? err.say : w.linkFail, true); $("job").focus(); }
 }
 $("company").addEventListener("input", () => { refresh(); saveDraft(); clearTimeout(jt); jt = setTimeout(readCompany, 300); });
 $("model").addEventListener("change", saveDraft);
