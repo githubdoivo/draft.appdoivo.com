@@ -162,7 +162,7 @@ export async function readJob(raw) {
   const li = url.hostname.endsWith("linkedin.com") && (url.pathname.match(/\/jobs\/view\/(?:[^/]*-)?(\d{6,})/) || [null, url.searchParams.get("currentJobId")])[1];
   const target = li ? `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${li}` : url.href;
   const res = await fetch(target, { redirect: "follow", signal: AbortSignal.timeout(8000),
-    headers: { "user-agent": "Mozilla/5.0 (compatible; type.appdoivo.com; reads one job ad on request)", accept: "text/html,application/xhtml+xml", "accept-language": "en-GB,en;q=0.9,pt;q=0.8" } });
+    headers: { "user-agent": "Mozilla/5.0 (compatible; draft.appdoivo.com; reads one job ad on request)", accept: "text/html,application/xhtml+xml", "accept-language": "en-GB,en;q=0.9,pt;q=0.8" } });
   if (!res.ok || !/html/i.test(res.headers.get("content-type") || "")) return null;
   const html = (await res.text()).slice(0, 2_000_000);
   if (li) {

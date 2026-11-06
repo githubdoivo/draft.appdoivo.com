@@ -1,4 +1,4 @@
-// Type: a CV (and cover letter) tailored to one job ad, built to pass applicant tracking systems.
+// Draft: a CV (and cover letter) tailored to one job ad, built to pass applicant tracking systems.
 // The AI writes the content (worker/, behind a passcode and prepaid credit); everything
 // else, reading the upload, the PDF and Word files, the check, runs here in the browser.
 import { WORDS } from "./words.js";

@@ -1,4 +1,4 @@
-# Type (type.appdoivo.com, was Job): ChatGPT design prompts
+# Draft (draft.appdoivo.com, was Job, then Type): ChatGPT design prompts
 
 Goal: calm, mindful and very professional, the feeling of a good stationery shop or a
 quiet career coach's desk. It must feel trustworthy with someone's CV, never "AI startup"

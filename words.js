@@ -3,7 +3,7 @@
 export const WORDS = {
   en: {
     lang: "en", other: "PT", otherLabel: "Ver em português", toDark: "Dark Mode", toLight: "Light Mode",
-    title: "Type · Your CV, Tailored to Every Job", brand: "Type", tagline: "Your CV, Tailored to Every Job",
+    title: "Draft · Your CV, Tailored to Every Job", brand: "Draft", tagline: "Your CV, Tailored to Every Job",
     intro: "Your CV and a job ad in; a CV shaped to that job out, ready for applicant tracking systems. Nothing is invented.",
     stepCv: "Your CV", choose: "Upload Your CV", drop: "or drop the file here", pasteInstead: "Paste Text Instead", cvHint: "PDF or Word. It stays on this device until you tailor it.", change: "Change",
     readOk: "Read {n} words from {f}", readFail: "That file could not be read. Try a PDF or Word file, or paste the text.", cvPaste: "Paste the CV text here",
@@ -39,7 +39,7 @@ export const WORDS = {
   },
   pt: {
     lang: "pt", other: "EN", otherLabel: "View in English", toDark: "Modo Escuro", toLight: "Modo Claro",
-    title: "Type · O CV à Medida de Cada Vaga", brand: "Type", tagline: "O CV à Medida de Cada Vaga",
+    title: "Draft · O CV à Medida de Cada Vaga", brand: "Draft", tagline: "O CV à Medida de Cada Vaga",
     intro: "Entra o CV e o anúncio de uma vaga; sai um CV moldado a essa vaga, pronto para os sistemas de recrutamento (ATS). Nada é inventado.",
     stepCv: "O CV", choose: "Carregar o CV", drop: "ou largar o ficheiro aqui", pasteInstead: "Colar Texto", cvHint: "PDF ou Word. Fica neste dispositivo até ser adaptado.", change: "Mudar",
     readOk: "{n} palavras lidas de {f}", readFail: "Não foi possível ler esse ficheiro. Experimentar um PDF ou Word, ou colar o texto.", cvPaste: "Colar aqui o texto do CV",

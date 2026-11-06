@@ -1,6 +1,6 @@
-# type.appdoivo.com
+# draft.appdoivo.com
 
-**Type**: upload a CV, paste a job ad (and, optionally, what the company stands for), and get
+**Draft**: upload a CV, paste a job ad (and, optionally, what the company stands for), and get
 a CV tailored to that job, plus a cover letter, both built to pass applicant tracking systems
 (ATS) and AI screeners. Nothing is invented: the AI may only reword, reorder and bring forward
 what the CV already shows; what the ad asks for and the CV lacks is listed as a gap instead.

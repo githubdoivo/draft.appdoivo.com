@@ -1,4 +1,4 @@
-# job-api: the private side of type.appdoivo.com (was Job). Holds the AI key, checks the
+# job-api: the private side of draft.appdoivo.com (was Job, then Type). Holds the AI key, checks the
 # passcode, keeps each account's prepaid credit and the saved results. Deploy: npm run deploy.
 # Secrets (never in this file): ANTHROPIC_API_KEY and PASSCODE, set in the Cloudflare
 # dashboard (Workers > job-api > Settings > Variables and Secrets) or with wrangler secret put
@@ -12,7 +12,7 @@ compatibility_flags = ["nodejs_compat"]
 # The owner's first credit in US dollars (only used once, when the account has no balance yet)
 START_CREDIT = "5"
 DAILY_RUNS = "40"
-ALLOWED_ORIGINS = "https://type.appdoivo.com,https://job.appdoivo.com,http://localhost:4182"
+ALLOWED_ORIGINS = "https://draft.appdoivo.com,http://localhost:4182"
 
 [[kv_namespaces]]
 binding = "JOB"
