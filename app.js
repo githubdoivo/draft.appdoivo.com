@@ -33,7 +33,7 @@ function fill() {
   $("job").placeholder = w.jobPh; $("company").placeholder = w.companyPh; $("cv-text").placeholder = w.cvPaste;
   $("lang").textContent = w.other; $("lang").setAttribute("aria-label", `${w.other}: ${w.otherLabel}`);
   $("swatches").innerHTML = Object.keys(COLOURS).map((k) => `<button type="button" role="radio" class="swatch" data-c="${k}" aria-checked="${k === colour}" style="--sw:${COLOURS[k].hex}"><span>${w.colours[k]}</span></button>`).join("");
-  const m = $("model").value || store.get("model") || "sonnet";
+  const m = $("model").value || store.get("model") || "opus";
   $("model").innerHTML = Object.keys(MODELS).map((k) => `<option value="${k}">${w.models[k]}</option>`).join("");
   $("model").value = m; modelCost();
   if (cvText && cvFile) cvLoaded();
@@ -239,6 +239,13 @@ function askPass() {
 }
 // Every call to the AI service: the passcode once per device, and plain-language errors
 async function api(path, body) {
+  // reading a link is free: no passcode for it
+  if (path === "/job") {
+    const res = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw { say: res.status === 429 ? w.slowDown : w.linkFail };
+    return data;
+  }
   const pass = store.get("pass") || await askPass();
   if (!pass) return null;
   const res = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json", "x-passcode": pass }, body: JSON.stringify(body) });

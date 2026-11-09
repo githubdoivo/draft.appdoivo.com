@@ -28,8 +28,9 @@ const call = (path, { pass, body, raw, method = "POST", origin = SITE, headers =
   w.fetch(path, { method, headers: { "content-type": "application/json", origin, "cf-connecting-ip": RUN_IP, ...(pass ? { "x-passcode": pass } : {}), ...headers },
     body: method === "GET" ? undefined : raw !== undefined ? raw : JSON.stringify(body ?? {}) });
 
-test("no passcode: every endpoint says 401", async () => {
-  for (const p of ["/tailor", "/review", "/job"]) assert.equal((await call(p)).status, 401, p);
+test("no passcode: every AI endpoint says 401; reading a link is free (no AI) and needs none", async () => {
+  for (const p of ["/tailor", "/review", "/interview"]) assert.equal((await call(p)).status, 401, p);
+  assert.notEqual((await call("/job", { body: { url: "not a link" } })).status, 401, "/job is open");
 });
 
 test("unknown paths and methods are 404, and another site gets no CORS permission", async () => {

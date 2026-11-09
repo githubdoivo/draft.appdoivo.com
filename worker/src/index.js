@@ -201,6 +201,20 @@ export default {
     const ip = req.headers.get("cf-connecting-ip") || "?", failKey = `fail:${ip}`;
     const fails = Number((await env.JOB.get(failKey)) || 0);
     if (fails >= 10) return json({ error: "locked" }, 429, h);
+    // Reading a job link costs no AI, so it needs no passcode: just 30 reads an hour per address
+    if (url.pathname === "/job") {
+      const rl = `jobrl:${ip}`, n = Number((await env.JOB.get(rl)) || 0);
+      if (n >= 30) return json({ error: "slow_down" }, 429, h);
+      await env.JOB.put(rl, String(n + 1), { expirationTtl: 3600 });
+      let body; try { body = JSON.parse(await req.text()); } catch (_) { return json({ error: "bad_request" }, 400, h); }
+      const link = clean(body && body.url, 2000);
+      const jkey = `jobread:${await sha256(link.replace(/[?#].*$/, ""))}`;
+      const hit = await env.JOB.get(jkey, "json");
+      if (hit) return json({ ...hit, cached: true }, 200, h);
+      const found = await readJob(link).catch(() => null);
+      if (found) await env.JOB.put(jkey, JSON.stringify({ ...found, text: found.text.slice(0, LIMITS.job) }), { expirationTtl: 7 * 86400 });
+      return found ? json({ ...found, text: found.text.slice(0, LIMITS.job) }, 200, h) : json({ error: "unreadable" }, 422, h);
+    }
     const who = await account(req, env);
     if (!who) { await env.JOB.put(failKey, String(fails + 1), { expirationTtl: 3600 }); return json({ error: "passcode" }, 401, h); }
 
@@ -211,22 +225,13 @@ export default {
     try { input = JSON.parse(raw); } catch (_) { return json({ error: "bad_request" }, 400, h); }
     if (!input || typeof input !== "object" || Array.isArray(input)) return json({ error: "bad_request" }, 400, h);
 
-    if (url.pathname === "/job") {
-      // a job read once is kept 7 days, so trying again never asks the site twice
-      const jkey = `jobread:${await sha256(clean(input.url, 2000).replace(/[?#].*$/, ""))}`;
-      const hit = await env.JOB.get(jkey, "json");
-      if (hit) return json({ ...hit, cached: true }, 200, h);
-      const found = await readJob(clean(input.url, 2000)).catch(() => null);
-      if (found) await env.JOB.put(jkey, JSON.stringify({ ...found, text: found.text.slice(0, LIMITS.job) }), { expirationTtl: 7 * 86400 });
-      return found ? json({ ...found, text: found.text.slice(0, LIMITS.job) }, 200, h) : json({ error: "unreadable" }, 422, h);
-    }
 
     const cv = clean(input.cv, LIMITS.cv), job = clean(input.job, LIMITS.job), company = clean(input.company, LIMITS.company);
     if (cv.length < 200 || job.length < 80) return json({ error: "too_short" }, 400, h);
     const interview = url.pathname === "/interview";
     const review = url.pathname === "/review" || interview;   // interview runs like review: Haiku, low effort
     const ui = input.ui === "pt" ? "pt" : "en";
-    const model = review ? "haiku" : MODELS[input.model] ? input.model : "sonnet";
+    const model = review ? "haiku" : who === "owner" && MODELS[input.model] ? input.model : "opus";   // the best model; only the owner picks, to test cheaply
     // What the candidate decided on the review board
     const c = input.choices || {};
     const choices = review ? null : {
