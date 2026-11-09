@@ -170,9 +170,11 @@ export async function readJob(raw) {
   if (!/^https?:$/.test(url.protocol) || url.port || url.username || /^(localhost|[\d.]+|\[.*\])$/i.test(url.hostname) || !url.hostname.includes(".")) return null;
   // LinkedIn shows job pages only to signed-in people, but has a public page per job
   const li = url.hostname.endsWith("linkedin.com") && (url.pathname.match(/\/jobs\/view\/(?:[^/]*-)?(\d{6,})/) || [null, url.searchParams.get("currentJobId")])[1];
-  const target = li ? `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${li}` : url.href;
-  const res = await fetch(target, { redirect: "follow", signal: AbortSignal.timeout(8000),
+  const get = (u) => fetch(u, { redirect: "follow", signal: AbortSignal.timeout(8000),
     headers: { "user-agent": "Mozilla/5.0 (compatible; draft.appdoivo.com; reads one job ad on request)", accept: "text/html,application/xhtml+xml", "accept-language": "en-GB,en;q=0.9,pt;q=0.8" } });
+  let res = await get(li ? `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${li}` : url.href);
+  // LinkedIn often answers "busy" (429/999) to one public page: try its other public job page once
+  if (li && !res.ok) res = await get(`https://www.linkedin.com/jobs/view/${li}/`);
   if (!res.ok || !/html/i.test(res.headers.get("content-type") || "")) return null;
   const html = (await res.text()).slice(0, 2_000_000);
   if (li) {
@@ -210,7 +212,12 @@ export default {
     if (!input || typeof input !== "object" || Array.isArray(input)) return json({ error: "bad_request" }, 400, h);
 
     if (url.pathname === "/job") {
+      // a job read once is kept 7 days, so trying again never asks the site twice
+      const jkey = `jobread:${await sha256(clean(input.url, 2000).replace(/[?#].*$/, ""))}`;
+      const hit = await env.JOB.get(jkey, "json");
+      if (hit) return json({ ...hit, cached: true }, 200, h);
       const found = await readJob(clean(input.url, 2000)).catch(() => null);
+      if (found) await env.JOB.put(jkey, JSON.stringify({ ...found, text: found.text.slice(0, LIMITS.job) }), { expirationTtl: 7 * 86400 });
       return found ? json({ ...found, text: found.text.slice(0, LIMITS.job) }, 200, h) : json({ error: "unreadable" }, 422, h);
     }
 

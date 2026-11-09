@@ -200,7 +200,12 @@ async function readLink(u) {
     readJob(); readCompany(); refresh(); saveDraft();
     // both steps are filled from the link; you stay here to check the job, then Continue shows the company filled too
     linkFilled = true;
-  } catch (err) { status("job-status", err.say && err.say !== w.failed ? err.say : w.linkFail, true); $("job").focus(); }
+  } catch (err) {
+    status("job-status", err.say && err.say !== w.failed ? err.say : w.linkFail, true);
+    // one tap to the ad itself, to copy its text (only http(s) links)
+    if (/^https?:\/\//i.test(u)) { const go = document.createElement("a"); go.className = "btn ghost open-ad"; go.href = u; go.target = "_blank"; go.rel = "noopener noreferrer"; go.textContent = w.openAd; $("job-status").append(" ", go); }
+    $("job").focus();
+  }
 }
 $("company").addEventListener("input", () => { refresh(); saveDraft(); clearTimeout(jt); jt = setTimeout(readCompany, 300); });
 $("model").addEventListener("change", saveDraft);
