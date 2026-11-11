@@ -10,6 +10,7 @@ const answer = async (page) => {
 };
 // Walks the machine: Continue only works once the step is valid; Back returns
 // the owner's passcode now sits under "Owner passcode" in the sign-in window (APP-DR-003)
+const ready = (page) => expect(page.locator("#lang")).toHaveAttribute("aria-label", /.+/);   // the page has run: its words are filled in
 const ownerPass = async (page, v) => { await page.locator("#sign-dialog .owner").evaluate((d) => { d.open = true; }); await page.locator("#pass").fill(v); await page.locator("#pass-form button").click(); };
 const CV = "Alex Morgan\nalex.morgan@example.com | +351 910 000 000\nQA Engineer, Northwind 2022 - present\n" + "Built Playwright and TypeScript test suites for checkout. ".repeat(12);
 const fillForm = async (page) => {
@@ -383,7 +384,7 @@ test.describe("invite codes and People", () => {
       if (path === "/account/create") { created++; return route.fulfill({ status: 200, json: { signedIn: true, name: "Alex", credits: 5, prices: ME_OUT.prices, packs: [] } }); }
       route.fulfill({ status: 404, json: {} });
     });
-    await page.goto("/?lang=en"); await page.locator("#acct").click();
+    await page.goto("/?lang=en"); await ready(page); await page.locator("#acct").click();
     await expect(page.locator("#sign-lead")).toContainText("needs an invite code");
     const create = page.getByRole("button", { name: "Create My Account" }), err = page.locator("#sign-err");
     await create.click();
@@ -395,7 +396,7 @@ test.describe("invite codes and People", () => {
     await expect(page.locator("#sign-dialog")).toBeHidden(); await expect(page.locator("#acct")).toHaveText("5 credits");
     expect(created, "a double tap makes one account").toBe(1); expect(asked.filter((b) => b.invite === "abcd-efgh").length).toBe(1);
   });
-  test("I Already Have an Account needs no code; an invite link opens the window with the code filled in", async ({ page }) => {
+  test("Sign In needs no code; an invite link opens the window on New Account with the code filled in", async ({ page }) => {
     const asked = [];
     await fakePasskey(page);
     await page.route(API, (route) => {
@@ -407,8 +408,10 @@ test.describe("invite codes and People", () => {
     });
     await page.goto("/?lang=en&invite=ABCD-EFGH%3Cscript%3E");
     await expect(page.locator("#sign-dialog")).toBeVisible(); await expect(page.locator("#sign-invite")).toHaveValue("ABCD-EFGHscript");
+    await expect(page.locator("#tab-new")).toHaveAttribute("aria-selected", "true");
     await page.locator("#sign-invite").fill("");
-    await page.getByRole("button", { name: "I Already Have an Account" }).click();
+    await page.getByRole("tab", { name: "Sign In" }).click(); await expect(page.locator("#pane-new")).toBeHidden();
+    await page.getByRole("button", { name: "Sign In With Face ID / Touch ID" }).click();
     await expect(page.locator("#acct")).toHaveText("4 credits"); expect(asked).toEqual([{ mode: "signin", name: "" }]);
     // the owner's device: an invite link doesn't ask the owner to sign in
     await page.evaluate(() => localStorage.setItem("pass", "right")); await page.goto("/?lang=en&invite=ABCDEFGH"); await page.waitForTimeout(400);
@@ -431,7 +434,7 @@ test.describe("invite codes and People", () => {
     });
     await page.goto("/?lang=en"); await expect(page.locator("#people-btn")).toBeHidden();
     await page.evaluate(() => localStorage.setItem("pass", "right")); await page.reload();
-    await page.locator("#people-btn").click(); await expect(page.locator("#people")).toBeVisible();
+    await ready(page); await page.locator("#people-btn").click(); await expect(page.locator("#people")).toBeVisible();
     await expect(page.locator("#pp-invites li")).toHaveText([/USED-CODE.*Used by Alex · 10 Nov 2026/]); await expect(page.locator("#pp-invites .pp-copy")).toHaveCount(0);
     await expect(page.locator("#pp-users li")).toHaveText([/Alex.*2 credits · since 10 Nov 2026/, /Test Account.*1 credit · since 11 Nov 2026/]);
     // New Invite Link, double tapped: one new code
@@ -456,7 +459,126 @@ test.describe("invite codes and People", () => {
     if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + "/people-" + info.project.name + ".png" });
     await page.locator("#people-close").click(); await expect(page.locator("#people")).toBeHidden();
     // a wrong owner passcode: People says so and shows nothing
-    await page.evaluate(() => localStorage.setItem("pass", "nope")); await page.reload(); await page.locator("#people-btn").click();
+    await page.evaluate(() => localStorage.setItem("pass", "nope")); await page.reload(); await ready(page); await page.locator("#people-btn").click();
     await expect(page.locator("#pp-err")).toBeVisible(); await expect(page.locator("#pp-users li")).toHaveText(["No accounts yet."]);
+  });
+});
+
+// APP-DR-003 round 3: the sign-in window is two clear tabs; every window shares one head, one field style, one rhythm
+test.describe("the windows: sign in, wallet and People", () => {
+  const ME = (signedIn) => ({ signedIn, name: "Alex", credits: 2, start: 5, prices: { "/tailor": 3, "/interview": 2, "/review": 0 }, packs: [{ id: "p10", credits: 10, eur: 4 }, { id: "p25", credits: 25, eur: 9 }, { id: "p60", credits: 60, eur: 19 }] });
+  const serve = (page, signedIn, signin = 200) => page.route(API, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/me") return route.fulfill({ status: 200, json: ME(signedIn) });
+    if (path === "/account/options") return route.fulfill({ status: 200, json: { challenge: "AAAA", rpId: "localhost", allowCredentials: [] } });
+    if (path === "/account/signin") return route.fulfill(signin === 200 ? { status: 200, json: ME(true) } : { status: 401, json: { error: "passkey_wrong" } });
+    if (path.startsWith("/admin/")) return route.fulfill({ status: 200, json: { users: [{ id: "u1", name: "A Very Long First Name That Goes On And On", created: "2026-11-10T11:00:00Z", credits: 12 }], invites: [{ code: "ABCDEFGH", created: "2026-11-10T10:00:00Z" }, { code: "USEDCODE", created: "2026-11-09T10:00:00Z", usedBy: "u1", usedName: "A Very Long First Name That Goes On And On", usedAt: "2026-11-10T11:00:00Z" }] } });
+    route.fulfill({ status: 404, json: {} });
+  });
+  const fakePasskey = (page) => page.addInitScript(() => { const buf = (n) => new Uint8Array(n).buffer; window.PublicKeyCredential = window.PublicKeyCredential || function () {};
+    Object.defineProperty(navigator, "credentials", { configurable: true, value: { create: async () => ({ id: "c", response: { clientDataJSON: buf(8), attestationObject: buf(8) } }), get: async () => ({ id: "c", response: { clientDataJSON: buf(8), authenticatorData: buf(8), signature: buf(8) } }) } }); });
+  // what a tidy window means, measured: nothing cut or sideways, 44px taps, one field style, even gaps to the edges, no accessibility problems
+  const tidy = async (page, id) => {
+    const q = await page.locator("#" + id).evaluate((d) => {
+      const box = d.getBoundingClientRect(), seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const taps = [...d.querySelectorAll("button, summary, input, a[href]")].filter(seen).map((e) => { const r = e.getBoundingClientRect(); return { n: e.id || e.className, w: Math.round(r.width), h: Math.round(r.height), out: r.left < box.left - 0.5 || r.right > box.right + 0.5 }; });
+      const fields = [...d.querySelectorAll("input")].filter(seen).map((e) => { const s = getComputedStyle(e); return [Math.round(e.getBoundingClientRect().height), s.backgroundColor, s.borderRadius, s.borderColor].join("|"); });
+      const kids = [...d.querySelectorAll(".btn, .field input, .seg2, .hint")].filter(seen).map((e) => Math.round(e.getBoundingClientRect().left - box.left));
+      return { small: taps.filter((t) => t.h < 43.5 || t.w < 43.5).map((t) => `${t.n} ${t.w}x${t.h}`), out: taps.filter((t) => t.out).map((t) => t.n), fields: [...new Set(fields)].length, lefts: [...new Set(kids)], sideways: d.scrollWidth > d.clientWidth + 1, fits: box.bottom <= innerHeight + 0.5 && box.top >= -0.5 && box.left >= 0 && box.right <= innerWidth + 0.5 };
+    });
+    expect.soft(q.small, id + ": taps are at least 44px").toEqual([]); expect.soft(q.out, id + ": nothing pokes out").toEqual([]);
+    expect.soft(q.fields, id + ": every field looks the same").toBeLessThanOrEqual(1); expect.soft(q.sideways, id + ": no sideways scroll").toBe(false); expect.soft(q.fits, id + ": fits the screen").toBe(true);
+    const a = await new AxeBuilder({ page }).include("#" + id).analyze(); expect.soft(a.violations.filter((v) => ["serious", "critical"].includes(v.impact)).map((v) => v.id), id + ": accessibility").toEqual([]);
+  };
+  for (const scheme of ["light", "dark"]) for (const lang of ["en", "pt"]) test(`every window is tidy (${scheme}, ${lang})`, async ({ page }, info) => {
+    await page.emulateMedia({ colorScheme: scheme }); await serve(page, false); await page.goto("/?lang=" + lang);
+    const shot = async (name) => { if (process.env.SHOTS && lang === "en") await page.screenshot({ path: `${process.env.SHOTS}/win-${name}-${scheme}-${info.project.name}.png` }); };
+    await ready(page); await page.locator("#acct").click(); await expect(page.locator("#pane-new")).toBeVisible(); await tidy(page, "sign-dialog"); await shot("new");
+    await page.locator("#sign-create").click(); await expect(page.locator("#sign-err")).toBeVisible(); await tidy(page, "sign-dialog");      // with the error showing
+    await page.locator("#tab-in").click(); await expect(page.locator("#sign-err")).toBeHidden(); await tidy(page, "sign-dialog"); await shot("in");
+    await page.locator("#sign-dialog .owner summary").click(); await tidy(page, "sign-dialog"); await shot("owner");
+    await page.locator("#sign-close").click(); await expect(page.locator("#sign-dialog")).toBeHidden();
+    await page.evaluate(() => localStorage.setItem("pass", "right")); await page.reload();
+    await ready(page); await page.locator("#people-btn").click(); await expect(page.locator("#pp-users li")).toHaveCount(1); await tidy(page, "people"); await shot("people");
+    await page.locator("#people-close").click(); await expect(page.locator("#people")).toBeHidden();
+    await page.evaluate(() => localStorage.removeItem("pass")); await page.unroute(API); await serve(page, true); await page.reload();
+    await ready(page); await page.locator("#acct").click(); await expect(page.locator("#wallet")).toBeVisible(); await tidy(page, "wallet"); await shot("wallet");
+    await page.locator("#wallet-close").click(); await expect(page.locator("#wallet")).toBeHidden();
+  });
+  test("tabs: a new device opens on New Account, a device that signed in before opens on Sign In; arrows and Escape work", async ({ page }) => {
+    await fakePasskey(page); await serve(page, false); await page.goto("/?lang=en");
+    await ready(page); await page.locator("#acct").click();
+    await expect(page.locator("#tab-new")).toHaveAttribute("aria-selected", "true"); await expect(page.locator("#pane-in")).toBeHidden();
+    await expect(page.locator("#sign-lead")).toContainText("invite code"); await expect(page.locator("#sign-lead")).toContainText("5 free credits");
+    await page.locator("#tab-new").focus(); await page.keyboard.press("ArrowLeft");
+    await expect(page.locator("#tab-in")).toHaveAttribute("aria-selected", "true"); await expect(page.locator("#tab-in")).toBeFocused(); await expect(page.locator("#pane-new")).toBeHidden();
+    await expect(page.getByRole("button", { name: "Sign In With Face ID / Touch ID" })).toBeVisible();
+    await page.keyboard.press("Escape"); await expect(page.locator("#sign-dialog")).toBeHidden();
+    // sign in once: from then on this device opens on Sign In
+    await ready(page); await page.locator("#acct").click(); await page.locator("#tab-in").click(); await page.locator("#sign-have").dblclick();
+    await expect(page.locator("#sign-dialog")).toBeHidden(); await expect(page.locator("#acct")).toHaveText("2 credits");
+    await page.unroute(API); await serve(page, false); await page.reload(); await ready(page); await page.locator("#acct").click();
+    await expect(page.locator("#tab-in")).toHaveAttribute("aria-selected", "true"); await expect(page.locator("#pane-new")).toBeHidden();
+  });
+  test("mistakes: a passkey with no account says where to go; Enter in the code field creates; switching tabs clears the message", async ({ page }) => {
+    const asked = [];
+    await fakePasskey(page); await serve(page, false, 401); await page.goto("/?lang=en");
+    page.on("request", (r) => { if (r.url().endsWith("/account/options")) asked.push(r.postDataJSON()); });
+    await ready(page); await page.locator("#acct").click(); await page.locator("#tab-in").click(); await page.locator("#sign-have").click();
+    await expect(page.locator("#sign-err")).toContainText("No account was found"); await expect(page.locator("#sign-dialog")).toBeVisible();
+    await expect(page.locator("#sign-have")).toBeEnabled();
+    await page.locator("#tab-new").click(); await expect(page.locator("#sign-err")).toBeHidden();
+    await page.locator("#sign-invite").press("Enter"); await expect(page.locator("#sign-err")).toContainText("Enter your invite code");
+    expect(asked.filter((b) => b.mode === "create")).toEqual([]);
+    await page.locator("#sign-name").fill("Alex"); await page.locator("#sign-invite").fill("abcd-efgh"); await page.locator("#sign-invite").press("Enter");
+    await expect.poll(() => asked.filter((b) => b.mode === "create")).toEqual([{ mode: "create", name: "Alex", invite: "abcd-efgh" }]);
+    // the owner's passcode still gets in, and its button says what it does
+    await page.locator("#sign-dialog .owner summary").click(); await expect(page.locator("#pass-ok")).toHaveText("Use Passcode");
+    await page.locator("#pass").fill("right"); await page.locator("#pass-ok").click();
+    await expect(page.locator("#sign-dialog")).toBeHidden(); await expect(page.locator("#people-btn")).toBeVisible(); await expect(page.locator("#acct")).toBeHidden();
+  });
+});
+
+// APP-DR-003 round 3: the whole app reviewed the same way, step by step: nothing sideways, 44px taps, readable, in light and dark
+test.describe("every screen of the app is tidy", () => {
+  const sweep = async (page, where) => {
+    const q = await page.evaluate(() => {
+      const seen = (e) => { const r = e.getBoundingClientRect(), s = getComputedStyle(e); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && !e.closest("[hidden], dialog:not([open]), .paper, .sr"); };
+      const out = { small: [], wide: [] };
+      for (const e of document.querySelectorAll("button, a[href], summary, select, input:not([type=hidden]):not([type=file]), textarea, [role=button], [role=tab], [role=radio]")) {
+        if (!seen(e) || e.closest("p, li") && e.tagName === "A") continue;                       // a link inside a sentence is text
+        const t = e.matches("input[type=checkbox], input[type=radio]") && e.closest("label") ? e.closest("label") : e, r = t.getBoundingClientRect();
+        if (r.height < 43.5 || r.width < 43.5) out.small.push(`${e.id ? "#" + e.id : e.className || e.tagName} ${Math.round(r.width)}x${Math.round(r.height)}`);
+      }
+      for (const e of document.querySelectorAll("body *")) { if (!seen(e)) continue; const r = e.getBoundingClientRect(); if (r.right > innerWidth + 1 && !e.closest(".bg, .tabs, .steps")) out.wide.push(e.id ? "#" + e.id : String(e.className).slice(0, 30) || e.tagName); }
+      out.scroll = document.documentElement.scrollWidth - innerWidth;
+      return out;
+    });
+    expect.soft([...new Set(q.small)], where + ": taps are at least 44px").toEqual([]);
+    expect.soft([...new Set(q.wide)].slice(0, 6), where + ": nothing sticks out sideways").toEqual([]);
+    expect.soft(q.scroll, where + ": no sideways scroll").toBeLessThanOrEqual(0);
+    const a = await new AxeBuilder({ page }).exclude(".paper").analyze();
+    expect.soft(a.violations.filter((v) => ["serious", "critical"].includes(v.impact)).map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(", ").slice(0, 120)}`), where + ": accessibility").toEqual([]);
+    if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/app-${where.replace(/\W+/g, "-")}-${test.info().project.name}.png`, fullPage: true });
+  };
+  for (const scheme of ["light", "dark"]) test(`steps 1 to 4, the review, the result and its tabs (${scheme})`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });
+    await page.route(API, async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/me") return route.fulfill({ status: 200, json: { signedIn: false, start: 5, prices: { "/tailor": 3, "/interview": 2, "/review": 0 }, packs: [] } });
+      if (path === "/review") return route.fulfill({ status: 200, json: REVIEW });
+      if (path === "/interview") return route.fulfill({ status: 200, json: { questions: [{ question: "Tell us about your test automation.", why: "The role is about Playwright.", answer: "At Northwind I built the Playwright suite." }], ask: ["How do you release?"], thanks: { subject: "Thank you", body: "Dear [Name], thank you." }, cost: "$0.003", balance: "$4.75" } });
+      route.fulfill({ status: 200, json: await answer(page) });
+    });
+    await page.goto("/?lang=en"); await ready(page); await page.evaluate(() => { localStorage.setItem("pass", "right"); localStorage.removeItem("applications"); }); await page.reload(); await ready(page);
+    await sweep(page, `step 1 ${scheme}`);
+    await page.locator("#paste-toggle").click(); await page.locator("#cv-text").fill(CV); await sweep(page, `step 1 filled ${scheme}`);
+    await page.locator("#next").click(); await sweep(page, `step 2 ${scheme}`);
+    await page.locator("#job").fill("We need a QA automation engineer with Playwright and TypeScript. ".repeat(4)); await page.locator("#next").click(); await sweep(page, `step 3 ${scheme}`);
+    await page.locator("#skip").click(); await sweep(page, `step 4 ${scheme}`);
+    const check = page.locator("#review-go, #check, [data-w='reviewGo']").first();
+    if (await check.isVisible().catch(() => false)) { await check.click(); await page.waitForTimeout(600); await sweep(page, `review ${scheme}`); }
+    await page.locator("#tailor").click(); await expect(page.locator("#result")).toBeVisible(); await page.waitForTimeout(500); await sweep(page, `result ${scheme}`);
+    for (const tab of await page.locator("#result [role=tab]").all()) { if (!(await tab.isVisible())) continue; await tab.click(); await page.waitForTimeout(250); await sweep(page, `result ${await tab.getAttribute("id")} ${scheme}`); }
   });
 });

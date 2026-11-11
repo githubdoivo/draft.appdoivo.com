@@ -32,6 +32,7 @@ function fill() {
   document.querySelectorAll("[data-w-placeholder]").forEach((el) => (el.placeholder = w[el.dataset.wPlaceholder] || ""));
   $("job").placeholder = w.jobPh; $("company").placeholder = w.companyPh; $("cv-text").placeholder = w.cvPaste;
   $("lang").textContent = w.other; $("lang").setAttribute("aria-label", `${w.other}: ${w.otherLabel}`);
+  for (const id of ["sign-close", "wallet-close", "people-close"]) $(id).setAttribute("aria-label", w.close);
   $("swatches").innerHTML = Object.keys(COLOURS).map((k) => `<button type="button" role="radio" class="swatch" data-c="${k}" aria-checked="${k === colour}" style="--sw:${COLOURS[k].hex}"><span>${w.colours[k]}</span></button>`).join("");
   const m = $("model").value || store.get("model") || "opus";
   $("model").innerHTML = Object.keys(MODELS).map((k) => `<option value="${k}">${w.models[k]}</option>`).join("");
@@ -251,10 +252,13 @@ function askSignIn() {
   return new Promise((resolve) => {
     signWait = resolve;
     $("sign-lead").textContent = w.signLead.replace("{n}", acct.start || 5); $("sign-err").hidden = true;
-    if (inviteFromLink && !$("sign-invite").value) $("sign-invite").value = inviteFromLink; $("pass").value = ""; $("pass-err").hidden = true;
+    if (inviteFromLink && !$("sign-invite").value) $("sign-invite").value = inviteFromLink;
+    // an invite link, or a device that never signed in: New Account first; a device that has signed in before: Sign In first
+    signTab(inviteFromLink || !store.get("hadAcct") ? "new" : "in"); $("pass").value = ""; $("pass-err").hidden = true;
     const ok = !!(window.PublicKeyCredential && navigator.credentials);
     $("sign-create").disabled = $("sign-have").disabled = !ok; if (!ok) { $("sign-err").hidden = false; $("sign-err").textContent = w.signNo; }
     $("sign-dialog").showModal();
+    ($("tab-in").getAttribute("aria-selected") === "true" ? $("tab-in") : $("tab-new")).focus();   // start on the chosen tab, not on Close
   });
 }
 const signDone = (v) => { const r = signWait; signWait = null; if ($("sign-dialog").open) $("sign-dialog").close(); paintAcct(); if (r) r(v); };
@@ -276,10 +280,17 @@ async function passkey(create) {
       const c = await navigator.credentials.get({ publicKey: { ...o, challenge: toBuf(o.challenge) } });
       data = await acctCall("/account/signin", { id: c.id, clientDataJSON: toB64u(c.response.clientDataJSON), authenticatorData: toB64u(c.response.authenticatorData), signature: toB64u(c.response.signature) });
     }
-    acct = { ...acct, ...data }; signDone("account");
-  } catch (e) { if (!(e && e.name === "NotAllowedError")) { $("sign-err").hidden = false; $("sign-err").textContent = e && e.error === "invite" ? w.signBadInvite : e && e.error === "invite_used" ? w.signUsedInvite : w.signFail; if (e && /^invite/.test(e.error || "")) $("sign-invite").focus(); } }
+    acct = { ...acct, ...data }; store.set("hadAcct", "1"); signDone("account");
+  } catch (e) { if (!(e && e.name === "NotAllowedError")) { $("sign-err").hidden = false; $("sign-err").textContent = e && e.error === "invite" ? w.signBadInvite : e && e.error === "invite_used" ? w.signUsedInvite : e && e.error === "passkey_wrong" ? w.signNoAcct : w.signFail; if (e && /^invite/.test(e.error || "")) $("sign-invite").focus(); } }
   finally { signing = false; $("sign-create").disabled = $("sign-have").disabled = false; }
 }
+function signTab(which) {
+  for (const k of ["in", "new"]) { const on = k === which; $("tab-" + k).setAttribute("aria-selected", String(on)); $("tab-" + k).tabIndex = on ? 0 : -1; $("pane-" + k).hidden = !on; }
+  $("sign-err").hidden = true;
+}
+$("tab-in").addEventListener("click", () => signTab("in")); $("tab-new").addEventListener("click", () => signTab("new"));
+$("sign-tabs").addEventListener("keydown", (e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { const to = $("tab-in").getAttribute("aria-selected") === "true" ? "new" : "in"; signTab(to); $("tab-" + to).focus(); } });
+for (const id of ["sign-invite", "sign-name"]) $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); passkey(true); } });
 $("sign-create").addEventListener("click", () => passkey(true));
 $("sign-have").addEventListener("click", () => passkey(false));
 $("pass-form").addEventListener("submit", (e) => { e.preventDefault(); const v = $("pass").value; if (v) { store.set("pass", v); signDone("pass"); } });

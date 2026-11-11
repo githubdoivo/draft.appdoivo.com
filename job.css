@@ -98,8 +98,6 @@ textarea#cv-text { margin-top: 12px; }
 .pass { border: 1px solid var(--edge); border-radius: 14px; background: var(--paper); color: var(--fg); padding: 22px; width: min(380px, calc(100vw - 32px)); }
 .pass::backdrop { background: rgba(0, 0, 0, .45); }
 .pass form { display: grid; gap: 10px; }
-.pass label { font: 600 20px var(--serif); }
-.pass input { min-height: 46px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 10px; background: var(--bg); }
 
 /* The result: tabs, downloads, a sheet of paper, the check */
 .result { margin-top: 44px; scroll-margin-top: 12px; }
@@ -269,7 +267,7 @@ textarea#cv-text { margin-top: 12px; }
 .app-head .co, .app-head .date { color: var(--muted); font-size: 14px; }
 .app-head .date { margin-left: auto; font-family: var(--mono); font-size: 12.5px; }
 .app-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
-.app-row select, .app-row input { min-height: 40px; border: 1px solid var(--edge); border-radius: 8px; background: transparent; color: var(--fg); padding: 0 8px; font: inherit; }
+.app-row select, .app-row input { min-height: 44px; border: 1px solid var(--edge); border-radius: 8px; background: transparent; color: var(--fg); padding: 0 8px; font: inherit; }
 .follow { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .link-btn { background: none; border: 0; color: var(--muted); text-decoration: underline; min-height: 44px; cursor: pointer; font: inherit; font-size: 13px; }
 .news { margin: 14px 0 0; padding: 10px 14px; border: 1px dashed var(--brass); border-radius: 12px; font-size: 15px; color: var(--muted); max-width: 62ch; }
@@ -307,15 +305,31 @@ textarea#cv-text { margin-top: 12px; }
 .acct { min-height: 44px; padding: 0 14px; border: 1px solid var(--edge); border-radius: 999px; background: transparent; color: var(--brass); font: 600 13px var(--mono); cursor: pointer; white-space: nowrap; }
 .acct:hover { border-color: var(--brass); }
 .acct[hidden] { display: none; }
+/* the windows (sign in, wallet, People) share one head, one field and one rhythm (APP-DR-003 round 3) */
 #sign-dialog, #wallet { width: min(440px, calc(100vw - 32px)); }
-#sign-dialog h2, #wallet h2 { margin: 0 0 6px; }
-#sign-dialog input#sign-name { width: 100%; min-height: 48px; margin: 6px 0 12px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 10px; background: var(--paper); color: var(--fg); font: inherit; }
-.sign-btns { display: grid; gap: 8px; }
-.sign-btns .btn { width: 100%; }
-.owner { margin: 14px 0 4px; }
-.owner summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--muted); font-size: 14px; }
-.owner form { display: grid; gap: 8px; }
-.owner input { min-height: 44px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 10px; background: var(--paper); color: var(--fg); font: inherit; }
+.pass { padding: 20px 22px 22px; max-height: calc(100dvh - 32px); overflow: auto; }
+.dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 14px; }
+.dlg-head h2 { margin: 0; font-size: 24px; line-height: 1.2; }
+.dlg-x { flex: none; width: 44px; height: 44px; margin: -6px -10px -6px 0; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.dlg-x:hover { color: var(--fg); background: var(--bg); }
+.dlg-x svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.pass .hint { margin: 0 0 14px; }
+.pass .field { display: grid; gap: 6px; margin: 0 0 14px; font: 500 13px var(--mono); letter-spacing: .04em; color: var(--muted); }
+.pass .field input { width: 100%; min-height: 48px; padding: 0 14px; border: 1px solid var(--edge); border-radius: 10px; background: var(--bg); color: var(--fg); font: 16px var(--text); letter-spacing: 0; }
+.pass .field input:focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
+.pass .btn { width: 100%; }
+.pass .err { margin: 12px 0 0; }
+.seg2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin: 0 0 16px; border: 1px solid var(--edge); border-radius: 999px; background: var(--bg); }
+.seg2 button { min-height: 44px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: 600 14px var(--mono); cursor: pointer; }
+.seg2 button[aria-selected="true"] { background: var(--brass); color: var(--brass-ink); }
+.pane[hidden] { display: none; }
+.owner { margin: 16px 0 0; padding-top: 6px; border-top: 1px solid var(--line); }
+.owner summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--muted); font: 500 13px var(--mono); letter-spacing: .04em; }
+.owner form { display: grid; gap: 0; padding-top: 6px; }
+.owner summary { justify-content: space-between; list-style: none; }
+.owner summary::-webkit-details-marker { display: none; }
+.owner summary::after { content: "+"; font: 400 20px var(--mono); line-height: 1; }
+.owner[open] summary::after { content: "\2212"; }
 .wallet-left { margin: 0 0 8px; font: 600 22px var(--mono); color: var(--brass); }
 #wallet h3 { margin: 16px 0 6px; font-size: 14px; }
 .prices { list-style: none; margin: 0; padding: 0; }
@@ -323,15 +337,13 @@ textarea#cv-text { margin-top: 12px; }
 .prices li:first-child { border-top: 0; }
 .packs { display: grid; gap: 8px; }
 .packs .btn { width: 100%; }
-#wallet .go { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+#wallet .go { display: flex; justify-content: flex-start; align-items: center; margin-top: 12px; }
 
 /* People (APP-DR-003 round 2): the owner's invite codes and accounts */
-.pass label[for="sign-invite"] { display: block; margin-top: 12px; }
-#sign-invite { width: 100%; font-family: var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.pass .field #sign-invite { font-family: var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 #sign-invite::placeholder { letter-spacing: .08em; opacity: .45; }
 .people { width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
 .people h3 { margin: 18px 0 8px; }
-.people #pp-new { width: 100%; }
 .pp-list { list-style: none; margin: 8px 0 0; padding: 0; }
 .pp-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 0; border-top: 1px solid var(--line); }
 .pp-list li:first-child { border-top: 0; }
@@ -339,7 +351,12 @@ textarea#cv-text { margin-top: 12px; }
 .pp-text b { font: 600 15px var(--mono); overflow-wrap: anywhere; }
 .pp-text span, .pp-none { color: var(--muted); font-size: 14px; }
 .pp-acts { display: flex; flex-wrap: wrap; gap: 8px; }
-.pp-acts .btn { min-height: 44px; padding: 0 14px; }
+.pp-acts .btn { width: auto; min-height: 44px; padding: 0 14px; }
 .pp-remove.sure { color: var(--bad); border-color: var(--bad); }
 .pp-link { min-height: 44px; width: 100%; padding: 0 10px; border: 1px solid var(--edge); border-radius: 10px; background: var(--bg); color: var(--fg); font: 13px var(--mono); }
-.people .go { display: flex; justify-content: space-between; margin-top: 14px; }
+#wallet #sign-out { min-width: 44px; }
+/* every picker is a 44px tap (found by the whole-app sweep, APP-DR-003 round 3) */
+select { -webkit-appearance: none; appearance: none; height: 48px; min-height: 48px; padding: 0 40px 0 14px; line-height: 1.2;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; background-size: 18px; }
+.app-row select, .app-row input { height: 44px; min-height: 44px; width: auto; }
+.app-row select { padding: 0 36px 0 10px; }
