@@ -182,12 +182,49 @@ const siteOf = (req, env) => { const o = req.headers.get("origin") || ""; return
 async function checkClient(env, site, clientDataB64, authData, type) {
   const cd = JSON.parse(new TextDecoder().decode(unb64u(clientDataB64)));
   if (cd.type !== type || cd.origin !== site.origin) throw new Error("bad_client");
-  const ck = `chal:${cd.challenge}`;
-  if (!(await env.JOB.get(ck))) throw new Error("bad_challenge");
+  const ck = `chal:${cd.challenge}`, kept = await env.JOB.get(ck);
+  if (!kept) throw new Error("bad_challenge");
   await env.JOB.delete(ck);
   const rpHash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(site.hostname)));
   if (!rpHash.every((v, i) => v === authData[i])) throw new Error("bad_rp");
   if ((authData[32] & 0x05) !== 0x05) throw new Error("not_verified");
+  return kept;                                                      // what the challenge was made for: "1" (sign in) or the invite code (create)
+}
+// ---- invite codes (APP-DR-003 round 2): a new account needs one; one code makes one account. inv:{CODE} {code,created,usedBy?,usedName?,usedAt?} ----
+const INVITE_ABC = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";                // no 0/O, 1/I/L: easy to read aloud and type
+const inviteCode = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 16);
+const newInvite = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => INVITE_ABC[b % INVITE_ABC.length]).join("");
+const listAll = async (env, prefix) => { const out = []; let cursor; do { const r = await env.JOB.list({ prefix, cursor, limit: 1000 }); out.push(...r.keys.map((k) => k.name)); cursor = r.list_complete ? null : r.cursor; } while (cursor && out.length < 5000); return out; };
+// The owner's People window: invite codes and accounts. Only with the owner's passcode.
+async function adminApi(req, env, url, h) {
+  let body = {}; try { body = JSON.parse((await req.text()) || "{}"); } catch (_) { return json({ error: "bad_request" }, 400, h); }
+  const people = async () => {
+    const users = (await Promise.all((await listAll(env, "user:")).map((k) => env.JOB.get(k, "json")))).filter(Boolean);
+    const invites = (await Promise.all((await listAll(env, "inv:")).map((k) => env.JOB.get(k, "json")))).filter(Boolean);
+    return { users: (await Promise.all(users.map(async (u) => ({ id: u.id, name: u.name, created: u.created, credits: await credits(env, u.id) })))).sort((a, b) => String(b.created).localeCompare(String(a.created))),
+      invites: invites.sort((a, b) => String(b.created).localeCompare(String(a.created))) };
+  };
+  if (url.pathname === "/admin/people") return json(await people(), 200, h);
+  if (url.pathname === "/admin/invite") {
+    if ((await listAll(env, "inv:")).length >= 500) return json({ error: "too_many" }, 409, h);
+    const code = newInvite(); await env.JOB.put(`inv:${code}`, JSON.stringify({ code, created: new Date().toISOString() }));
+    return json({ code, ...(await people()) }, 200, h);
+  }
+  if (url.pathname === "/admin/invite/delete") {
+    const code = inviteCode(body.code), inv = code && await env.JOB.get(`inv:${code}`, "json");
+    if (!inv) return json({ error: "not_found" }, 404, h);
+    await env.JOB.delete(`inv:${code}`);                            // an unused code stops working; a used one only leaves the list (its account stays)
+    return json(await people(), 200, h);
+  }
+  if (url.pathname === "/admin/user/delete") {
+    const id = clean(body.id, 60), u = id && await env.JOB.get(`user:${id}`, "json");
+    if (!u) return json({ error: "not_found" }, 404, h);
+    // the account, its credits, its passkeys and its sessions all go
+    for (const prefix of ["pk:", "sess:"]) for (const k of await listAll(env, prefix)) { const v = await env.JOB.get(k, "json"); if (v && v.user === id) await env.JOB.delete(k); }
+    await env.JOB.delete(`credits:${id}`); await env.JOB.delete(`user:${id}`);
+    return json(await people(), 200, h);
+  }
+  return json({ error: "not_found" }, 404, h);
 }
 async function accountApi(req, env, url, h) {
   const site = siteOf(req, env);
@@ -202,7 +239,11 @@ async function accountApi(req, env, url, h) {
   if (n >= 30) return json({ error: "slow_down" }, 429, h);
   await env.JOB.put(rl, String(n + 1), { expirationTtl: 3600 });
   if (url.pathname === "/account/options") {
-    const challenge = rand(32); await env.JOB.put(`chal:${challenge}`, "1", { expirationTtl: 300 });
+    const challenge = rand(32);
+    // a new account needs an invite code that nobody has used yet
+    const code = body.mode === "create" ? inviteCode(body.invite) : "", inv = code ? await env.JOB.get(`inv:${code}`, "json") : null;
+    if (body.mode === "create" && (!inv || inv.usedBy)) return json({ error: inv ? "invite_used" : "invite" }, 403, h);
+    await env.JOB.put(`chal:${challenge}`, code || "1", { expirationTtl: 300 });
     if (body.mode === "create") {
       const uid = rand(12), name = clean(body.name, 40) || "Draft";
       return json({ challenge, rp: { name: "draftdoivo", id: site.hostname }, user: { id: b64u(new TextEncoder().encode(uid)), name, displayName: name },
@@ -214,14 +255,17 @@ async function accountApi(req, env, url, h) {
   if (url.pathname === "/account/create") {
     try {
       const [att] = cbor(unb64u(body.attestationObject)); const ad = att.get("authData");
-      await checkClient(env, site, body.clientDataJSON, ad, "webauthn.create");
+      const code = await checkClient(env, site, body.clientDataJSON, ad, "webauthn.create");
       if (!(ad[32] & 0x40)) throw new Error("no_key");
+      const inv = await env.JOB.get(`inv:${code}`, "json");
+      if (!inv || inv.usedBy) return json({ error: inv ? "invite_used" : "invite" }, 403, h);
       const idLen = (ad[53] << 8) | ad[54], credId = b64u(ad.slice(55, 55 + idLen));
       const [cose] = cbor(ad, 55 + idLen); const { alg, jwk } = coseToJwk(cose);
       const uid = new TextDecoder().decode(unb64u(body.userId || "")).slice(0, 40) || rand(12);
       if (await env.JOB.get(`user:${uid}`)) throw new Error("exists");
       const name = clean(body.name, 40) || "Draft";
-      await env.JOB.put(`user:${uid}`, JSON.stringify({ id: uid, name, created: new Date().toISOString() }));
+      await env.JOB.put(`inv:${code}`, JSON.stringify({ ...inv, usedBy: uid, usedName: name, usedAt: new Date().toISOString() }));   // the code is spent first: one code, one account
+      await env.JOB.put(`user:${uid}`, JSON.stringify({ id: uid, name, created: new Date().toISOString(), invite: code }));
       await env.JOB.put(`credits:${uid}`, String(START_CREDITS));          // 5 free credits to start
       await env.JOB.put(`pk:${credId}`, JSON.stringify({ user: uid, jwk, alg }));
       const token = rand(32); await env.JOB.put(`sess:${token}`, JSON.stringify({ user: uid }), { expirationTtl: SESSION_DAYS * 86400 });
@@ -322,7 +366,8 @@ export default {
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: h });
     const url = new URL(req.url);
     if (url.pathname === "/me" || url.pathname.startsWith("/account/")) return accountApi(req, env, url, h);
-    if (!["/tailor", "/review", "/job", "/interview"].includes(url.pathname) || req.method !== "POST") return json({ error: "not_found" }, 404, h);
+    const admin = url.pathname.startsWith("/admin/");
+    if ((!admin && !["/tailor", "/review", "/job", "/interview"].includes(url.pathname)) || req.method !== "POST") return json({ error: "not_found" }, 404, h);
     if (Number(req.headers.get("content-length") || 0) > 200_000) return json({ error: "too_large" }, 413, h);
 
     // Ten wrong passcodes from one address lock it out for an hour
@@ -344,6 +389,11 @@ export default {
       return found ? json({ ...found, text: found.text.slice(0, LIMITS.job) }, 200, h) : json({ error: "unreadable" }, 422, h);
     }
     const who = await account(req, env);
+    // the People window (invites, accounts): the owner's passcode only; a signed-in account is not enough
+    if (admin) {
+      if (who !== "owner") { if (req.headers.get("x-passcode")) await env.JOB.put(failKey, String(fails + 1), { expirationTtl: 3600 }); return json({ error: "passcode" }, 401, h); }
+      return adminApi(req, env, url, h);
+    }
     if (!who) { if (req.headers.get("x-passcode")) { await env.JOB.put(failKey, String(fails + 1), { expirationTtl: 3600 }); return json({ error: "passcode" }, 401, h); } return json({ error: "signin" }, 401, h); }
 
     let input;

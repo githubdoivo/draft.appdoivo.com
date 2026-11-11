@@ -105,7 +105,8 @@ test("accounts: Face ID creates an account with 5 credits; signing in works; a f
   const r0 = await call("/tailor", { body: { cv: "x".repeat(300), job: "y".repeat(100) } });
   assert.equal(r0.status, 401); assert.equal((await r0.json()).error, "signin");
   // create
-  const o = await (await call("/account/options", { body: { mode: "create", name: "Alex" } })).json();
+  const code = (await (await call("/admin/invite", { pass: PASS })).json()).code;
+  const o = await (await call("/account/options", { body: { mode: "create", name: "Alex", invite: code } })).json();
   assert.equal(o.rp.id, "draft.appdoivo.com");
   const pk = await makePasskey();
   const ad = Uint8Array.from([...(await rpHash()), 0x45, 0, 0, 0, 0, ...new Uint8Array(16), 0, 16, ...pk.credId, ...pk.cose]);
@@ -142,4 +143,81 @@ test("accounts: a forged session or another site gets nothing", async () => {
   assert.equal(r.status, 401);
   assert.equal((await call("/account/options", { origin: "https://evil.example", body: { mode: "create" } })).status, 404);
   assert.equal((await call("/account/create", { body: { attestationObject: "!!", clientDataJSON: "!!" } })).status, 400);
+});
+
+// ---- invite codes and the owner's People window (APP-DR-003 round 2) ----
+const newAccount = async (invite, name = "Sam") => {
+  const or = await call("/account/options", { body: { mode: "create", name, invite } });
+  if (or.status !== 200) return { status: or.status, error: (await or.json()).error };
+  const o = await or.json(), pk = await makePasskey();
+  const ad = Uint8Array.from([...(await rpHash()), 0x45, 0, 0, 0, 0, ...new Uint8Array(16), 0, 16, ...pk.credId, ...pk.cose]);
+  const att = cborEnc(new Map([["fmt", "none"], ["attStmt", new Map()], ["authData", ad]]));
+  const send = () => call("/account/create", { body: { name, userId: o.user.id, clientDataJSON: b64u(clientData("webauthn.create", o.challenge)), attestationObject: b64u(att) } });
+  const cr = await send(); const data = await cr.json();
+  return { status: cr.status, error: data.error, data, cookie: cr.status === 200 ? cookieOf(cr) : "", pk, send };
+};
+const people = async () => (await call("/admin/people", { pass: PASS })).json();
+
+test("invites: no code, a wrong code or a used code can't create an account; one code makes exactly one", async () => {
+  for (const invite of [undefined, "", "NOPE-NOPE", "a".repeat(500), "../inv", { a: 1 }]) {
+    const r = await newAccount(invite); assert.equal(r.status, 403, JSON.stringify(invite)); assert.equal(r.error, "invite");
+  }
+  const invited = `Invited ${Date.now()}`, second = `Second ${Date.now()}`;
+  const { code } = await (await call("/admin/invite", { pass: PASS })).json();
+  assert.match(code, /^[A-HJ-NP-Z2-9]{8}$/);
+  // typed the way people type it: lower case, with a dash and spaces
+  const a = await newAccount(` ${code.slice(0, 4).toLowerCase()}-${code.slice(4).toLowerCase()} `, invited);
+  assert.equal(a.status, 200); assert.equal(a.data.credits, 5);
+  const again = await newAccount(code, second); assert.equal(again.status, 403); assert.equal(again.error, "invite_used");
+  const p = await people();
+  assert.equal(p.users.filter((u) => u.name === second).length, 0);
+  const inv = p.invites.find((i) => i.code === code); assert.equal(inv.usedName, invited); assert.ok(inv.usedAt);
+  assert.equal(p.users.find((u) => u.name === invited).credits, 5);
+});
+
+test("invites: two people starting with the same code at once get one account between them", async () => {
+  const { code } = await (await call("/admin/invite", { pass: PASS })).json();
+  const mk = async (name) => { const o = await (await call("/account/options", { body: { mode: "create", name, invite: code } })).json(), pk = await makePasskey();
+    const ad = Uint8Array.from([...(await rpHash()), 0x45, 0, 0, 0, 0, ...new Uint8Array(16), 0, 16, ...pk.credId, ...pk.cose]);
+    return () => call("/account/create", { body: { name, userId: o.user.id, clientDataJSON: b64u(clientData("webauthn.create", o.challenge)), attestationObject: b64u(cborEnc(new Map([["fmt", "none"], ["attStmt", new Map()], ["authData", ad]]))) } }); };
+  const tag = `Race ${Date.now()} `;                                    // local storage survives between runs: this run's own names
+  const one = await mk(tag + "One"), two = await mk(tag + "Two");          // both got their Face ID prompt before either finished
+  const r1 = await one(), r2 = await two();
+  assert.deepEqual([r1.status, r2.status], [200, 403]); assert.equal((await r2.json()).error, "invite_used");
+  assert.equal((await people()).users.filter((u) => u.name.startsWith(tag)).length, 1);
+});
+
+test("People is the owner's only: no passcode, a wrong one, or a signed-in account gets nothing", async () => {
+  const { code } = await (await call("/admin/invite", { pass: PASS })).json();
+  const a = await newAccount(code, "Not The Owner"); assert.equal(a.status, 200);
+  for (const path of ["/admin/people", "/admin/invite", "/admin/invite/delete", "/admin/user/delete"]) {
+    assert.equal((await call(path, { body: {} })).status, 401, path);
+    assert.equal((await call(path, { headers: { cookie: a.cookie }, body: {} })).status, 401, path + " with an account");
+    assert.equal((await call(path, { method: "GET" })).status, 404, path + " GET");
+  }
+  assert.equal((await call("/admin/people", { pass: "wrong-one", headers: { "cf-connecting-ip": "198.51.100.251" } })).status, 401);
+  assert.equal((await call("/admin/nothing", { pass: PASS })).status, 404);
+  assert.equal((await call("/admin/people", { pass: PASS, origin: "https://evil.example" })).headers.get("access-control-allow-origin"), null);
+});
+
+test("the owner removes an unused invite (it stops working) and an account (its passkey and session stop working)", async () => {
+  const { code } = await (await call("/admin/invite", { pass: PASS })).json();
+  assert.equal((await call("/admin/invite/delete", { pass: PASS, body: { code } })).status, 200);
+  assert.equal((await newAccount(code)).error, "invite");
+  assert.equal((await call("/admin/invite/delete", { pass: PASS, body: { code } })).status, 404, "a second tap finds nothing");
+  const c2 = (await (await call("/admin/invite", { pass: PASS })).json()).code;
+  const gone = `To Remove ${Date.now()}`;
+  const a = await newAccount(c2, gone); assert.equal(a.status, 200);
+  const id = (await people()).users.find((u) => u.name === gone).id;
+  const del = await call("/admin/user/delete", { pass: PASS, body: { id } }); assert.equal(del.status, 200);
+  assert.equal((await del.json()).users.filter((u) => u.id === id).length, 0);
+  assert.equal((await (await call("/me", { method: "GET", headers: { cookie: a.cookie } })).json()).signedIn, false);
+  const so = await (await call("/account/options", { body: {} })).json();
+  const ad2 = Uint8Array.from([...(await rpHash()), 0x05, 0, 0, 0, 1]), cd2 = clientData("webauthn.get", so.challenge);
+  const sig = rawToDer(new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, a.pk.kp.privateKey, Uint8Array.from([...ad2, ...new Uint8Array(await crypto.subtle.digest("SHA-256", cd2))]))));
+  assert.equal((await call("/account/signin", { body: { id: b64u(a.pk.credId), clientDataJSON: b64u(cd2), authenticatorData: b64u(ad2), signature: b64u(sig) } })).status, 401);
+  assert.equal((await call("/admin/user/delete", { pass: PASS, body: { id } })).status, 404, "a second tap finds nothing");
+  for (const bad of [{}, { id: "" }, { id: "../credits" }, { id: { x: 1 } }]) assert.equal((await call("/admin/user/delete", { pass: PASS, body: bad })).status, 404);
+  // the used code can't be used again after its account is gone
+  assert.equal((await newAccount(c2)).error, "invite_used");
 });

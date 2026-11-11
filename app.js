@@ -240,6 +240,7 @@ const toB64u = (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\
 const acctCall = async (path, body) => { const r = await fetch(`${API}${path}`, { method: body ? "POST" : "GET", credentials: "include", headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined }); const d = await r.json().catch(() => ({})); if (!r.ok) throw d; return d; };
 function paintAcct() {
   const b = $("acct"); if (!b) return;
+  $("people-btn").hidden = !store.get("pass");            // People (invite codes, accounts) is the owner's
   if (store.get("pass")) { b.hidden = true; return; }   // the owner's device shows the dollar credit instead
   b.hidden = false;
   b.textContent = acct.signedIn ? (acct.credits === 1 ? w.acctCredit1 : w.acctCredits.replace("{n}", acct.credits)) : w.acctIn;
@@ -249,7 +250,8 @@ let signWait = null;
 function askSignIn() {
   return new Promise((resolve) => {
     signWait = resolve;
-    $("sign-lead").textContent = w.signLead.replace("{n}", acct.start || 5); $("sign-err").hidden = true; $("pass").value = ""; $("pass-err").hidden = true;
+    $("sign-lead").textContent = w.signLead.replace("{n}", acct.start || 5); $("sign-err").hidden = true;
+    if (inviteFromLink && !$("sign-invite").value) $("sign-invite").value = inviteFromLink; $("pass").value = ""; $("pass-err").hidden = true;
     const ok = !!(window.PublicKeyCredential && navigator.credentials);
     $("sign-create").disabled = $("sign-have").disabled = !ok; if (!ok) { $("sign-err").hidden = false; $("sign-err").textContent = w.signNo; }
     $("sign-dialog").showModal();
@@ -262,8 +264,10 @@ let signing = false;
 async function passkey(create) {
   if (signing) return; signing = true; $("sign-err").hidden = true; $("sign-create").disabled = $("sign-have").disabled = true;
   try {
-    const name = $("sign-name").value.trim();
-    const o = await acctCall("/account/options", { mode: create ? "create" : "signin", name });
+    const name = $("sign-name").value.trim(), invite = $("sign-invite").value.trim();
+    // a new account needs an invite code (one code, one account): asked before Face ID, so nobody makes a passkey for nothing
+    if (create && !invite) { $("sign-err").hidden = false; $("sign-err").textContent = w.signNeedInvite; $("sign-invite").focus(); return; }
+    const o = await acctCall("/account/options", { mode: create ? "create" : "signin", name, ...(create ? { invite } : {}) });
     let data;
     if (create) {
       const c = await navigator.credentials.create({ publicKey: { ...o, challenge: toBuf(o.challenge), user: { ...o.user, id: toBuf(o.user.id) } } });
@@ -273,7 +277,7 @@ async function passkey(create) {
       data = await acctCall("/account/signin", { id: c.id, clientDataJSON: toB64u(c.response.clientDataJSON), authenticatorData: toB64u(c.response.authenticatorData), signature: toB64u(c.response.signature) });
     }
     acct = { ...acct, ...data }; signDone("account");
-  } catch (e) { if (!(e && e.name === "NotAllowedError")) { $("sign-err").hidden = false; $("sign-err").textContent = w.signFail; } }
+  } catch (e) { if (!(e && e.name === "NotAllowedError")) { $("sign-err").hidden = false; $("sign-err").textContent = e && e.error === "invite" ? w.signBadInvite : e && e.error === "invite_used" ? w.signUsedInvite : w.signFail; if (e && /^invite/.test(e.error || "")) $("sign-invite").focus(); } }
   finally { signing = false; $("sign-create").disabled = $("sign-have").disabled = false; }
 }
 $("sign-create").addEventListener("click", () => passkey(true));
@@ -292,7 +296,39 @@ function openWallet(need) {
 $("wallet-close").addEventListener("click", () => $("wallet").close());
 $("sign-out").addEventListener("click", async () => { try { await acctCall("/account/signout", {}); } catch (_) {} acct = { ...acct, signedIn: false, credits: 0 }; $("wallet").close(); paintAcct(); });
 $("acct").addEventListener("click", () => acct.signedIn ? openWallet(0) : askSignIn());
-loadAcct();
+// ---- People (APP-DR-003 round 2): the owner makes invite links, and sees or removes accounts ----
+const ownerCall = async (path, body = {}) => { const r = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json", "x-passcode": store.get("pass") || "" }, body: JSON.stringify(body) }); const d = await r.json().catch(() => ({})); if (!r.ok) throw { status: r.status, ...d }; return d; };
+const ppDay = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString(lang === "pt" ? "pt-PT" : "en-GB", { day: "numeric", month: "short", year: "numeric" }); };
+const inviteLink = (code) => `${location.origin}/?invite=${code}`;
+const showCode = (c) => String(c).replace(/^(.{4})(.+)$/, "$1-$2");
+let ppData = { users: [], invites: [] }, ppBusy = false, ppArmed = { key: "", at: 0 };
+function paintPeople() {
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  // Remove asks twice: the first tap arms the button, a second tap (not a double tap) removes
+  const remove = (key, run) => { const armed = ppArmed.key === key, b = el("button", "btn ghost pp-remove" + (armed ? " sure" : ""), armed ? w.ppSure : w.ppRemove); b.type = "button";
+    b.addEventListener("click", () => { if (ppArmed.key === key) { if (Date.now() - ppArmed.at > 500) run(); } else { ppArmed = { key, at: Date.now() }; paintPeople(); } }); return b; };
+  const row = (main, sub, ...acts) => { const li = el("li"), t = el("span", "pp-text"); t.append(el("b", null, main), el("span", null, sub)); const a = el("span", "pp-acts"); a.append(...acts); li.append(t, a); return li; };
+  $("pp-invites").replaceChildren(...(ppData.invites.length ? ppData.invites.map((i) => {
+    const acts = [];
+    if (!i.usedBy) { const c = el("button", "btn ghost pp-copy", w.ppCopy); c.type = "button"; c.addEventListener("click", async () => { try { await navigator.clipboard.writeText(inviteLink(i.code)); c.textContent = w.ppCopied; } catch (_) { c.replaceWith(Object.assign(el("input", "pp-link"), { value: inviteLink(i.code), readOnly: true, ariaLabel: w.ppCopy })); } }); acts.push(c); }
+    acts.push(remove("i:" + i.code, () => ppRun("/admin/invite/delete", { code: i.code })));
+    return row(showCode(i.code), i.usedBy ? w.ppUsed.replace("{n}", i.usedName || "?").replace("{d}", ppDay(i.usedAt)) : w.ppFree, ...acts);
+  }) : [el("li", "pp-none", w.ppNoInvites)]));
+  $("pp-users").replaceChildren(...(ppData.users.length ? ppData.users.map((u) =>
+    row(u.name || "Draft", (u.credits === 1 ? w.ppAcct1 : w.ppAcct.replace("{c}", u.credits)).replace("{d}", ppDay(u.created)), remove("u:" + u.id, () => ppRun("/admin/user/delete", { id: u.id })))) : [el("li", "pp-none", w.ppNoAccounts)]));
+}
+async function ppRun(path, body) {
+  if (ppBusy) return; ppBusy = true; $("pp-err").hidden = true; $("pp-new").disabled = true;
+  try { const d = await ownerCall(path, body); ppData = { users: d.users || [], invites: d.invites || [] }; ppArmed = { key: "", at: 0 }; paintPeople(); }
+  catch (e) { $("pp-err").hidden = false; $("pp-err").textContent = e && e.status === 401 ? w.passWrong : w.ppFail; ppArmed = { key: "", at: 0 }; paintPeople(); }
+  finally { ppBusy = false; $("pp-new").disabled = false; }
+}
+$("people-btn").addEventListener("click", () => { $("people").querySelector(".hint").textContent = w.ppLead.replace("{n}", acct.start || 5); ppArmed = { key: "", at: 0 }; paintPeople(); if (!$("people").open) $("people").showModal(); ppRun("/admin/people"); });
+$("pp-new").addEventListener("click", () => ppRun("/admin/invite"));
+$("people-close").addEventListener("click", () => $("people").close());
+// An invite link (?invite=CODE) opens the sign-in window with the code filled in
+const inviteFromLink = (new URLSearchParams(location.search).get("invite") || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 24);
+loadAcct().then(() => { if (inviteFromLink && !acct.signedIn && !store.get("pass")) askSignIn(); });
 
 // ---- tailoring ----
 // Every call to the AI service: the passcode once per device, and plain-language errors

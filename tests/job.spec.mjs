@@ -359,3 +359,104 @@ test.describe("share text with a link inside", () => {
     expect(asked).toEqual([]);
   });
 });
+
+// APP-DR-003 round 2: a new account needs an invite code; the owner makes invite links and manages accounts in People
+test.describe("invite codes and People", () => {
+  const ME_OUT = { signedIn: false, start: 5, prices: { "/tailor": 3, "/interview": 2, "/review": 0 }, packs: [] };
+  const fakePasskey = (page) => page.addInitScript(() => {
+    const buf = (n) => new Uint8Array(n).buffer;
+    window.PublicKeyCredential = window.PublicKeyCredential || function () {};
+    Object.defineProperty(navigator, "credentials", { configurable: true, value: { create: async () => ({ id: "cred", response: { clientDataJSON: buf(8), attestationObject: buf(8) } }), get: async () => ({ id: "cred", response: { clientDataJSON: buf(8), authenticatorData: buf(8), signature: buf(8) } }) } });
+  });
+  test("Create My Account asks for the code first; a wrong or used code says so; the right one makes the account once", async ({ page }) => {
+    const asked = []; let created = 0;
+    await fakePasskey(page);
+    await page.route(API, async (route) => {
+      const path = new URL(route.request().url()).pathname, body = route.request().postDataJSON() || {};
+      if (path === "/me") return route.fulfill({ status: 200, json: ME_OUT });
+      if (path === "/account/options") { asked.push(body);
+        if (body.mode !== "create") return route.fulfill({ status: 200, json: { challenge: "AAAA", rpId: "localhost", allowCredentials: [] } });
+        if (body.invite === "WRONG") return route.fulfill({ status: 403, json: { error: "invite" } });
+        if (body.invite === "USED-CODE") return route.fulfill({ status: 403, json: { error: "invite_used" } });
+        await new Promise((r) => setTimeout(r, 300));
+        return route.fulfill({ status: 200, json: { challenge: "AAAA", rp: { name: "draftdoivo", id: "localhost" }, user: { id: "AAAA", name: "Alex", displayName: "Alex" }, pubKeyCredParams: [] } }); }
+      if (path === "/account/create") { created++; return route.fulfill({ status: 200, json: { signedIn: true, name: "Alex", credits: 5, prices: ME_OUT.prices, packs: [] } }); }
+      route.fulfill({ status: 404, json: {} });
+    });
+    await page.goto("/?lang=en"); await page.locator("#acct").click();
+    await expect(page.locator("#sign-lead")).toContainText("needs an invite code");
+    const create = page.getByRole("button", { name: "Create My Account" }), err = page.locator("#sign-err");
+    await create.click();
+    await expect(err).toContainText("Enter your invite code"); expect(asked).toEqual([]); await expect(page.locator("#sign-invite")).toBeFocused();
+    await page.locator("#sign-invite").fill("WRONG"); await create.click(); await expect(err).toContainText("isn't right");
+    await page.locator("#sign-invite").fill("USED-CODE"); await create.click(); await expect(err).toContainText("already used");
+    await expect(page.locator("#sign-dialog")).toBeVisible(); expect(created).toBe(0);
+    await page.locator("#sign-invite").fill("abcd-efgh"); await create.dblclick();
+    await expect(page.locator("#sign-dialog")).toBeHidden(); await expect(page.locator("#acct")).toHaveText("5 credits");
+    expect(created, "a double tap makes one account").toBe(1); expect(asked.filter((b) => b.invite === "abcd-efgh").length).toBe(1);
+  });
+  test("I Already Have an Account needs no code; an invite link opens the window with the code filled in", async ({ page }) => {
+    const asked = [];
+    await fakePasskey(page);
+    await page.route(API, (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/me") return route.fulfill({ status: 200, json: ME_OUT });
+      if (path === "/account/options") { asked.push(route.request().postDataJSON()); return route.fulfill({ status: 200, json: { challenge: "AAAA", rpId: "localhost", allowCredentials: [] } }); }
+      if (path === "/account/signin") return route.fulfill({ status: 200, json: { signedIn: true, name: "Alex", credits: 4, prices: ME_OUT.prices, packs: [] } });
+      route.fulfill({ status: 404, json: {} });
+    });
+    await page.goto("/?lang=en&invite=ABCD-EFGH%3Cscript%3E");
+    await expect(page.locator("#sign-dialog")).toBeVisible(); await expect(page.locator("#sign-invite")).toHaveValue("ABCD-EFGHscript");
+    await page.locator("#sign-invite").fill("");
+    await page.getByRole("button", { name: "I Already Have an Account" }).click();
+    await expect(page.locator("#acct")).toHaveText("4 credits"); expect(asked).toEqual([{ mode: "signin", name: "" }]);
+    // the owner's device: an invite link doesn't ask the owner to sign in
+    await page.evaluate(() => localStorage.setItem("pass", "right")); await page.goto("/?lang=en&invite=ABCDEFGH"); await page.waitForTimeout(400);
+    await expect(page.locator("#sign-dialog")).toBeHidden();
+  });
+  test("People: only on the owner's device; New Invite Link, Copy Link, and Remove that asks twice", async ({ page, browserName }, info) => {
+    let invites = [{ code: "USEDCODE", created: "2026-11-10T10:00:00Z", usedBy: "u1", usedName: "Alex", usedAt: "2026-11-10T11:00:00Z" }], users = [{ id: "u1", name: "Alex", created: "2026-11-10T11:00:00Z", credits: 2 }, { id: "u2", name: "Test Account", created: "2026-11-11T09:00:00Z", credits: 1 }];
+    const calls = []; let fail = 0;
+    await page.route(API, async (route) => {
+      const path = new URL(route.request().url()).pathname, body = route.request().postDataJSON() || {};
+      if (path === "/me") return route.fulfill({ status: 200, json: ME_OUT });
+      if (!path.startsWith("/admin/")) return route.fulfill({ status: 404, json: {} });
+      calls.push(path);
+      if (route.request().headers()["x-passcode"] !== "right") return route.fulfill({ status: 401, json: { error: "passcode" } });
+      if (fail) { fail--; return route.fulfill({ status: 500, json: {} }); }
+      if (path === "/admin/invite") { await new Promise((r) => setTimeout(r, 250)); invites = [{ code: "NEWC" + (2000 + invites.length), created: new Date().toISOString() }, ...invites]; }
+      if (path === "/admin/invite/delete") invites = invites.filter((i) => i.code !== body.code);
+      if (path === "/admin/user/delete") users = users.filter((u) => u.id !== body.id);
+      route.fulfill({ status: 200, json: { users, invites } });
+    });
+    await page.goto("/?lang=en"); await expect(page.locator("#people-btn")).toBeHidden();
+    await page.evaluate(() => localStorage.setItem("pass", "right")); await page.reload();
+    await page.locator("#people-btn").click(); await expect(page.locator("#people")).toBeVisible();
+    await expect(page.locator("#pp-invites li")).toHaveText([/USED-CODE.*Used by Alex · 10 Nov 2026/]); await expect(page.locator("#pp-invites .pp-copy")).toHaveCount(0);
+    await expect(page.locator("#pp-users li")).toHaveText([/Alex.*2 credits · since 10 Nov 2026/, /Test Account.*1 credit · since 11 Nov 2026/]);
+    // New Invite Link, double tapped: one new code
+    await page.locator("#pp-new").dblclick(); await expect(page.locator("#pp-invites li")).toHaveCount(2);
+    expect(calls.filter((c) => c === "/admin/invite").length).toBe(1);
+    await expect(page.locator("#pp-invites li").first()).toContainText("NEWC-2001"); await expect(page.locator("#pp-invites li").first()).toContainText("Not used yet");
+    if (browserName === "chromium") await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.locator("#pp-invites .pp-copy").click();
+    await expect(page.locator("#pp-invites li").first().locator(".pp-copy, .pp-link")).toHaveCount(1);   // Copied, or the link shown to copy by hand
+    // Remove: a double tap only arms it; a second tap removes
+    const rm = page.locator("#pp-users li", { hasText: "Test Account" }).locator(".pp-remove");
+    await rm.dblclick(); await expect(rm).toHaveText("Tap Again to Remove"); expect(calls.filter((c) => c === "/admin/user/delete").length).toBe(0);
+    // a failed save: the message shows and the account stays
+    fail = 1; await page.waitForTimeout(600); await rm.click();
+    await expect(page.locator("#pp-err")).toHaveText("That didn't work. Try again."); await expect(page.locator("#pp-users li")).toHaveCount(2);
+    await rm.click(); await page.waitForTimeout(600); await page.locator("#pp-users li", { hasText: "Test Account" }).locator(".pp-remove").click();
+    await expect(page.locator("#pp-users li")).toHaveCount(1); await expect(page.locator("#pp-err")).toBeHidden();
+    // 44px taps, nothing sideways, no accessibility problems in the window
+    const small = await page.locator("#people button").evaluateAll((n) => n.map((b) => b.getBoundingClientRect()).filter((r) => r.height < 43.5 || r.width < 43.5).length); expect(small).toBe(0);
+    expect(await page.evaluate(() => { const d = document.getElementById("people"); return d.scrollWidth <= d.clientWidth + 1; })).toBe(true);
+    const axe = await new AxeBuilder({ page }).include("#people").analyze(); expect(axe.violations.filter((v) => ["serious", "critical"].includes(v.impact)).map((v) => v.id)).toEqual([]);
+    if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + "/people-" + info.project.name + ".png" });
+    await page.locator("#people-close").click(); await expect(page.locator("#people")).toBeHidden();
+    // a wrong owner passcode: People says so and shows nothing
+    await page.evaluate(() => localStorage.setItem("pass", "nope")); await page.reload(); await page.locator("#people-btn").click();
+    await expect(page.locator("#pp-err")).toBeVisible(); await expect(page.locator("#pp-users li")).toHaveText(["No accounts yet."]);
+  });
+});
