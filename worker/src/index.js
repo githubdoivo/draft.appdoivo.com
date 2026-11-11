@@ -201,7 +201,7 @@ async function adminApi(req, env, url, h) {
   const people = async () => {
     const users = (await Promise.all((await listAll(env, "user:")).map((k) => env.JOB.get(k, "json")))).filter(Boolean);
     const invites = (await Promise.all((await listAll(env, "inv:")).map((k) => env.JOB.get(k, "json")))).filter(Boolean);
-    return { users: (await Promise.all(users.map(async (u) => ({ id: u.id, name: u.name, created: u.created, credits: await credits(env, u.id) })))).sort((a, b) => String(b.created).localeCompare(String(a.created))),
+    return { users: (await Promise.all(users.map(async (u) => ({ id: u.id, name: u.name, created: u.created, owner: !!u.owner, credits: await credits(env, u.id) })))).sort((a, b) => String(b.created).localeCompare(String(a.created))),
       invites: invites.sort((a, b) => String(b.created).localeCompare(String(a.created))) };
   };
   if (url.pathname === "/admin/people") return json(await people(), 200, h);
@@ -219,6 +219,7 @@ async function adminApi(req, env, url, h) {
   if (url.pathname === "/admin/user/delete") {
     const id = clean(body.id, 60), u = id && await env.JOB.get(`user:${id}`, "json");
     if (!u) return json({ error: "not_found" }, 404, h);
+    if (u.owner) return json({ error: "owner" }, 409, h);            // the owner's account can't be removed from People
     // the account, its credits, its passkeys and its sessions all go
     for (const prefix of ["pk:", "sess:"]) for (const k of await listAll(env, prefix)) { const v = await env.JOB.get(k, "json"); if (v && v.user === id) await env.JOB.delete(k); }
     await env.JOB.delete(`credits:${id}`); await env.JOB.delete(`user:${id}`);
@@ -228,7 +229,13 @@ async function adminApi(req, env, url, h) {
 }
 async function accountApi(req, env, url, h) {
   const site = siteOf(req, env);
-  const me = async (u) => ({ signedIn: true, name: u.name, credits: await credits(env, u.id), prices: PRICES, packs: PACKS });
+  const me = async (u) => ({ signedIn: true, name: u.name, owner: !!u.owner, credits: await credits(env, u.id), prices: PRICES, packs: PACKS });
+  // the owner's secret is only ever used to make one account the owner's (APP-DR-003 round 4); ten wrong tries lock the address like everywhere else
+  const failKey = `fail:${req.headers.get("cf-connecting-ip") || "?"}`;
+  const ownerSecret = async () => { const pass = req.headers.get("x-passcode") || ""; if (!pass) return false;
+    const fails = Number((await env.JOB.get(failKey)) || 0); if (fails >= 10) return false;
+    const ok = !!env.PASSCODE && sameText(await sha256(pass), await sha256(env.PASSCODE));
+    if (!ok) await env.JOB.put(failKey, String(fails + 1), { expirationTtl: 3600 }); return ok; };
   if (url.pathname === "/me" && req.method === "GET") {
     const u = await sessionUser(req, env);
     return json(u ? await me(u) : { signedIn: false, prices: PRICES, packs: PACKS, start: START_CREDITS }, 200, h);
@@ -242,8 +249,10 @@ async function accountApi(req, env, url, h) {
     const challenge = rand(32);
     // a new account needs an invite code that nobody has used yet
     const code = body.mode === "create" ? inviteCode(body.invite) : "", inv = code ? await env.JOB.get(`inv:${code}`, "json") : null;
-    if (body.mode === "create" && (!inv || inv.usedBy)) return json({ error: inv ? "invite_used" : "invite" }, 403, h);
-    await env.JOB.put(`chal:${challenge}`, code || "1", { expirationTtl: 300 });
+    // the owner's own first account needs no invite: the owner's secret stands in for it, and that account is the owner's
+    const boss = body.mode === "create" && (!inv || inv.usedBy) && await ownerSecret();
+    if (body.mode === "create" && !boss && (!inv || inv.usedBy)) return json({ error: inv ? "invite_used" : "invite" }, 403, h);
+    await env.JOB.put(`chal:${challenge}`, boss ? "!owner" : code || "1", { expirationTtl: 300 });
     if (body.mode === "create") {
       const uid = rand(12), name = clean(body.name, 40) || "Draft";
       return json({ challenge, rp: { name: "draftdoivo", id: site.hostname }, user: { id: b64u(new TextEncoder().encode(uid)), name, displayName: name },
@@ -257,20 +266,27 @@ async function accountApi(req, env, url, h) {
       const [att] = cbor(unb64u(body.attestationObject)); const ad = att.get("authData");
       const code = await checkClient(env, site, body.clientDataJSON, ad, "webauthn.create");
       if (!(ad[32] & 0x40)) throw new Error("no_key");
-      const inv = await env.JOB.get(`inv:${code}`, "json");
-      if (!inv || inv.usedBy) return json({ error: inv ? "invite_used" : "invite" }, 403, h);
+      const boss = code === "!owner", inv = boss ? null : await env.JOB.get(`inv:${code}`, "json");
+      if (!boss && (!inv || inv.usedBy)) return json({ error: inv ? "invite_used" : "invite" }, 403, h);
       const idLen = (ad[53] << 8) | ad[54], credId = b64u(ad.slice(55, 55 + idLen));
       const [cose] = cbor(ad, 55 + idLen); const { alg, jwk } = coseToJwk(cose);
       const uid = new TextDecoder().decode(unb64u(body.userId || "")).slice(0, 40) || rand(12);
       if (await env.JOB.get(`user:${uid}`)) throw new Error("exists");
       const name = clean(body.name, 40) || "Draft";
-      await env.JOB.put(`inv:${code}`, JSON.stringify({ ...inv, usedBy: uid, usedName: name, usedAt: new Date().toISOString() }));   // the code is spent first: one code, one account
-      await env.JOB.put(`user:${uid}`, JSON.stringify({ id: uid, name, created: new Date().toISOString(), invite: code }));
+      if (!boss) await env.JOB.put(`inv:${code}`, JSON.stringify({ ...inv, usedBy: uid, usedName: name, usedAt: new Date().toISOString() }));   // the code is spent first: one code, one account
+      await env.JOB.put(`user:${uid}`, JSON.stringify({ id: uid, name, created: new Date().toISOString(), ...(boss ? { owner: true } : { invite: code }) }));
       await env.JOB.put(`credits:${uid}`, String(START_CREDITS));          // 5 free credits to start
       await env.JOB.put(`pk:${credId}`, JSON.stringify({ user: uid, jwk, alg }));
       const token = rand(32); await env.JOB.put(`sess:${token}`, JSON.stringify({ user: uid }), { expirationTtl: SESSION_DAYS * 86400 });
-      return json(await me({ id: uid, name }), 200, { ...h, "set-cookie": sessionCookie(token, SESSION_DAYS) });
+      return json(await me({ id: uid, name, owner: boss }), 200, { ...h, "set-cookie": sessionCookie(token, SESSION_DAYS) });
     } catch (_) { return json({ error: "passkey_failed" }, 400, h); }
+  }
+  // an account that already exists becomes the owner's: signed in, plus the owner's secret, once
+  if (url.pathname === "/account/owner") {
+    const u = await sessionUser(req, env); if (!u) return json({ error: "signin" }, 401, h);
+    if (!(await ownerSecret())) return json({ error: "passcode" }, 401, h);
+    const now = { ...u, owner: true }; await env.JOB.put(`user:${u.id}`, JSON.stringify(now));
+    return json(await me(now), 200, h);
   }
   if (url.pathname === "/account/signin") {
     try {
@@ -389,9 +405,11 @@ export default {
       return found ? json({ ...found, text: found.text.slice(0, LIMITS.job) }, 200, h) : json({ error: "unreadable" }, 422, h);
     }
     const who = await account(req, env);
-    // the People window (invites, accounts): the owner's passcode only; a signed-in account is not enough
+    // the owner's account: unlimited runs, the model picker and the People window
+    const sessU = who && who.startsWith("u:") ? await env.JOB.get(`user:${who.slice(2)}`, "json") : null, free = !!(sessU && sessU.owner), boss = who === "owner" || free;
+    // the People window (invites, accounts): the owner only; any other signed-in account is not enough
     if (admin) {
-      if (who !== "owner") { if (req.headers.get("x-passcode")) await env.JOB.put(failKey, String(fails + 1), { expirationTtl: 3600 }); return json({ error: "passcode" }, 401, h); }
+      if (!boss) { if (req.headers.get("x-passcode")) await env.JOB.put(failKey, String(fails + 1), { expirationTtl: 3600 }); return json({ error: "passcode" }, 401, h); }
       return adminApi(req, env, url, h);
     }
     if (!who) { if (req.headers.get("x-passcode")) { await env.JOB.put(failKey, String(fails + 1), { expirationTtl: 3600 }); return json({ error: "passcode" }, 401, h); } return json({ error: "signin" }, 401, h); }
@@ -409,7 +427,7 @@ export default {
     const interview = url.pathname === "/interview";
     const review = url.pathname === "/review" || interview;   // interview runs like review: Haiku, low effort
     const ui = input.ui === "pt" ? "pt" : "en";
-    const model = review ? "haiku" : who === "owner" && MODELS[input.model] ? input.model : "opus";   // the best model; only the owner picks, to test cheaply
+    const model = review ? "haiku" : boss && MODELS[input.model] ? input.model : "opus";   // the best model; only the owner picks, to test cheaply
     // What the candidate decided on the review board
     const c = input.choices || {};
     const choices = review ? null : {
@@ -426,7 +444,7 @@ export default {
     const saved = await env.JOB.get(key, "json");
     if (saved) return json({ ...saved, cached: true, ...(uid ? { credits: have, price: 0 } : { cost: usd(0), balance: usd(left) }) }, 200, h);
 
-    if (uid ? have < price : left <= 0) return json({ error: "credit", ...(uid ? { credits: have, price } : { balance: usd(left) }) }, 402, h);
+    if (uid ? !free && have < price : left <= 0) return json({ error: "credit", ...(uid ? { credits: have, price } : { balance: usd(left) }) }, 402, h);
     const runsKey = `runs:${who}:${day()}`, runs = Number((await env.JOB.get(runsKey)) || 0);
     if (runs >= Number(env.DAILY_RUNS || 40)) return json({ error: "daily_limit" }, 429, h);
 
@@ -488,7 +506,7 @@ export default {
       out.letter = out.letter?.paragraphs?.length ? { ...out.letter, lang: out.cv.lang, name: out.cv.name, contact: out.cv.contact } : null;
     }
     await env.JOB.put(key, JSON.stringify(out), { expirationTtl: CACHE_DAYS * 86400 });
-    if (uid && price) { const now = Math.max(0, (await credits(env, uid)) - price); await env.JOB.put(`credits:${uid}`, String(now)); paid = { credits: now, price }; }
+    if (uid && price && !free) { const now = Math.max(0, (await credits(env, uid)) - price); await env.JOB.put(`credits:${uid}`, String(now)); paid = { credits: now, price }; }
     return json({ ...out, cached: false, model, ...paid }, 200, h);
   },
 };

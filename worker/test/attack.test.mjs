@@ -24,8 +24,10 @@ before(async () => {
 });
 after(async () => { await w?.stop(); });
 
+let ip = RUN_IP;                                               // account calls are limited per address: later groups of tests use their own
+const freshIp = () => { ip = `203.0.113.${Math.floor(Math.random() * 250) + 1}`; };
 const call = (path, { pass, body, raw, method = "POST", origin = SITE, headers = {} } = {}) =>
-  w.fetch(path, { method, headers: { "content-type": "application/json", origin, "cf-connecting-ip": RUN_IP, ...(pass ? { "x-passcode": pass } : {}), ...headers },
+  w.fetch(path, { method, headers: { "content-type": "application/json", origin, "cf-connecting-ip": ip, ...(pass ? { "x-passcode": pass } : {}), ...headers },
     body: method === "GET" ? undefined : raw !== undefined ? raw : JSON.stringify(body ?? {}) });
 
 test("no passcode: every AI endpoint says 401; reading a link is free (no AI) and needs none", async () => {
@@ -188,6 +190,7 @@ test("invites: two people starting with the same code at once get one account be
 });
 
 test("People is the owner's only: no passcode, a wrong one, or a signed-in account gets nothing", async () => {
+  freshIp();
   const { code } = await (await call("/admin/invite", { pass: PASS })).json();
   const a = await newAccount(code, "Not The Owner"); assert.equal(a.status, 200);
   for (const path of ["/admin/people", "/admin/invite", "/admin/invite/delete", "/admin/user/delete"]) {
@@ -201,6 +204,7 @@ test("People is the owner's only: no passcode, a wrong one, or a signed-in accou
 });
 
 test("the owner removes an unused invite (it stops working) and an account (its passkey and session stop working)", async () => {
+  freshIp();
   const { code } = await (await call("/admin/invite", { pass: PASS })).json();
   assert.equal((await call("/admin/invite/delete", { pass: PASS, body: { code } })).status, 200);
   assert.equal((await newAccount(code)).error, "invite");
@@ -220,4 +224,39 @@ test("the owner removes an unused invite (it stops working) and an account (its 
   for (const bad of [{}, { id: "" }, { id: "../credits" }, { id: { x: 1 } }]) assert.equal((await call("/admin/user/delete", { pass: PASS, body: bad })).status, 404);
   // the used code can't be used again after its account is gone
   assert.equal((await newAccount(c2)).error, "invite_used");
+});
+
+// ---- the owner's account (APP-DR-003 round 4): no passcode to use Draft; one account is the owner's, with People and no credit limit ----
+test("owner: a signed-in account becomes the owner's with the secret, once; then its session alone opens People", async () => {
+  freshIp();
+  const { code } = await (await call("/admin/invite", { pass: PASS })).json();
+  const a = await newAccount(code, `Boss ${Date.now()}`); assert.equal(a.status, 200); assert.equal(a.data.owner, false);
+  // not signed in, no secret, a wrong secret: nothing changes
+  assert.equal((await call("/account/owner", { pass: PASS })).status, 401);
+  assert.equal((await call("/account/owner", { headers: { cookie: a.cookie } })).status, 401);
+  assert.equal((await call("/account/owner", { pass: "not-it", headers: { cookie: a.cookie, "cf-connecting-ip": "198.51.100.252" } })).status, 401);
+  assert.equal((await (await call("/me", { method: "GET", headers: { cookie: a.cookie } })).json()).owner, false);
+  assert.equal((await call("/admin/people", { headers: { cookie: a.cookie } })).status, 401);
+  const ok = await call("/account/owner", { pass: PASS, headers: { cookie: a.cookie } }); assert.equal(ok.status, 200); assert.equal((await ok.json()).owner, true);
+  assert.equal((await (await call("/me", { method: "GET", headers: { cookie: a.cookie } })).json()).owner, true);
+  const p = await call("/admin/people", { headers: { cookie: a.cookie } }); assert.equal(p.status, 200);
+  const mine = (await p.json()).users.find((u) => u.owner && u.name.startsWith("Boss ")); assert.ok(mine);
+  // the owner's account can't be removed from People (not even by a second tap), and a run is never refused for credits
+  assert.equal((await call("/admin/user/delete", { headers: { cookie: a.cookie }, body: { id: mine.id } })).status, 409);
+  const t = await call("/tailor", { headers: { cookie: a.cookie }, body: { cv: "Alex Morgan, QA engineer. ".repeat(20), job: "We need a QA engineer with Playwright. ".repeat(5) } });
+  assert.notEqual(t.status, 402); assert.notEqual(t.status, 401);
+  // another site can't use the owner's session
+  assert.equal((await call("/admin/people", { headers: { cookie: a.cookie }, origin: "https://evil.example" })).headers.get("access-control-allow-origin"), null);
+});
+test("owner: the first account needs no invite when the owner's secret is given; without it, or with a wrong one, an invite is still needed", async () => {
+  freshIp();
+  const mk = async (headers) => { const or = await call("/account/options", { headers, body: { mode: "create", name: "First" } }); if (or.status !== 200) return { status: or.status };
+    const o = await or.json(), pk = await makePasskey(), ad = Uint8Array.from([...(await rpHash()), 0x45, 0, 0, 0, 0, ...new Uint8Array(16), 0, 16, ...pk.credId, ...pk.cose]);
+    const cr = await call("/account/create", { body: { name: "First", userId: o.user.id, clientDataJSON: b64u(clientData("webauthn.create", o.challenge)), attestationObject: b64u(cborEnc(new Map([["fmt", "none"], ["attStmt", new Map()], ["authData", ad]]))) } });
+    return { status: cr.status, data: await cr.json() }; };
+  assert.equal((await mk({})).status, 403);
+  assert.equal((await mk({ "x-passcode": "wrong", "cf-connecting-ip": "198.51.100.253" })).status, 403);
+  const boss = await mk({ "x-passcode": PASS }); assert.equal(boss.status, 200); assert.equal(boss.data.owner, true);
+  // an invite code typed as the word OWNER is just a wrong code
+  assert.equal((await newAccount("OWNER")).error, "invite"); assert.equal((await newAccount("!owner")).error, "invite");
 });

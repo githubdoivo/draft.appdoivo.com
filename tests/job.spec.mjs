@@ -11,7 +11,9 @@ const answer = async (page) => {
 // Walks the machine: Continue only works once the step is valid; Back returns
 // the owner's passcode now sits under "Owner passcode" in the sign-in window (APP-DR-003)
 const ready = (page) => expect(page.locator("#lang")).toHaveAttribute("aria-label", /.+/);   // the page has run: its words are filled in
-const ownerPass = async (page, v) => { await page.locator("#sign-dialog .owner").evaluate((d) => { d.open = true; }); await page.locator("#pass").fill(v); await page.locator("#pass-form button").click(); };
+// the owner's account, as the service reports it: no passcode anywhere (APP-DR-003 round 4)
+const ME_OWNER = { signedIn: true, owner: true, name: "Ivo", credits: 0, start: 5, prices: { "/tailor": 3, "/interview": 2, "/review": 0 }, packs: [] };
+const isMe = (route) => new URL(route.request().url()).pathname === "/me";
 const CV = "Alex Morgan\nalex.morgan@example.com | +351 910 000 000\nQA Engineer, Northwind 2022 - present\n" + "Built Playwright and TypeScript test suites for checkout. ".repeat(12);
 const fillForm = async (page) => {
   await expect(page.locator("#next")).toBeDisabled();
@@ -76,36 +78,40 @@ test("colours: five, keyboard-reachable, and the CV follows the choice", async (
   await expect(page.locator('.swatch[data-c="yellow"]')).toHaveAttribute("aria-checked", "true");
 });
 
-test("tailoring: passcode, the answer, its cost, and the errors", async ({ page }) => {
-  let calls = 0, reply = 200;
+test("tailoring: signed out it asks to sign in first; signed in, the answer, its cost, and the errors", async ({ page }) => {
+  let calls = 0, reply = 200, me = { signedIn: false, start: 5 };
   await page.route(API, async (route) => {
-    if (route.request().method() === "GET") return route.fulfill({ status: 200, json: { signedIn: false } });   // the account lookup isn't a run
+    if (isMe(route)) return route.fulfill({ status: 200, json: me });        // the account lookup isn't a run
     calls++;
-    if (route.request().headers()["x-passcode"] !== "right") return route.fulfill({ status: 401, json: { error: "passcode" } });
-    if (reply === 402) return route.fulfill({ status: 402, json: { error: "credit", balance: "$0.00" } });
+    if (route.request().headers()["x-passcode"]) return route.fulfill({ status: 500, json: {} });   // no passcode is ever sent with a run
+    if (reply === 401) return route.fulfill({ status: 401, json: { error: "signin" } });
+    if (reply === 402) return route.fulfill({ status: 402, json: { error: "credit", credits: 1, price: 3 } });
     route.fulfill({ status: 200, json: await answer(page) });
   });
   await page.goto("/?lang=en");
   await fillForm(page);
   await page.locator("#tailor").click();
-  await ownerPass(page, "wrong");
-  await expect(page.locator("#status")).toHaveText("That passcode is not right.");
+  await expect(page.locator("#sign-dialog")).toBeVisible(); await expect(page.locator("#sign-dialog input[type=password]")).toHaveCount(0);   // no owner passcode in the window
+  await page.locator("#sign-close").click(); expect(calls, "closing the window runs nothing").toBe(0);
+  me = { ...ME_OWNER, owner: false, credits: 5 }; await page.reload();          // signed in now; the draft comes back on step 4
+  await expect(page.locator("#acct")).toHaveText("5 credits");
   await page.locator("#tailor").click();
-  await ownerPass(page, "right");
   await expect(page.locator("#result-note")).toHaveText("This run cost $0.0412. Credit left: $4.76.");
   await expect(page.locator("#notes")).toContainText("Accessibility testing");
   reply = 402;
-  await page.locator("#tailor").click();                                     // passcode remembered: no dialog
-  await expect(page.locator("#status")).toHaveText("The credit has run out.");
+  await page.locator("#tailor").click();
+  await expect(page.locator("#wallet")).toBeVisible(); await expect(page.locator("#wallet-need")).toHaveText("This needs 3 credits and you have 1.");
+  await page.locator("#wallet-close").click();
+  // the session ended meanwhile: it asks to sign in again instead of failing
+  reply = 401; await page.locator("#tailor").click(); await expect(page.locator("#sign-dialog")).toBeVisible();
   expect(calls).toBe(3);
 });
 
 test("when the AI service cannot be reached, it says so and points to the example", async ({ page }) => {
-  await page.route(API, (route) => route.abort());
+  await page.route(API, (route) => isMe(route) ? route.fulfill({ status: 200, json: ME_OWNER }) : route.abort());
   await page.goto("/?lang=en");
   await fillForm(page);
   await page.locator("#tailor").click();
-  await ownerPass(page, "x");
   await expect(page.locator("#status")).toContainText("isn't connected yet");
 });
 
@@ -182,12 +188,12 @@ test("the review board: a quick check first, then the CV is written with the per
   let body = null;
   await page.route(API, async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === "/me") return route.fulfill({ status: 200, json: ME_OWNER });   // the owner's account: the check runs straight away
     if (path === "/review") return route.fulfill({ status: 200, json: REVIEW });
     body = route.request().postDataJSON();
     route.fulfill({ status: 200, json: await answer(page) });
   });
   await page.goto("/?lang=en");
-  await page.evaluate(() => localStorage.setItem("pass", "right"));            // the owner's device: the check runs straight away
   await page.locator("#paste-toggle").click();
   await page.locator("#cv-text").fill(CV);
   await page.locator("#next").click();
@@ -222,7 +228,6 @@ test("a job link is read for you; a page that cannot be read says so", async ({ 
     ? route.fulfill({ status: 200, json: { title: "QA Engineer", company: "Northwind", text: "We need a QA automation engineer with Playwright and TypeScript. ".repeat(4) } })
     : route.fulfill({ status: 422, json: { error: "unreadable" } }));
   await page.goto("/?lang=en");
-  await page.evaluate(() => localStorage.setItem("pass", "right"));
   await page.locator("#paste-toggle").click();
   await page.locator("#cv-text").fill(CV);
   await page.locator("#next").click();
@@ -250,6 +255,8 @@ test("a job link is read for you; a page that cannot be read says so", async ({ 
 
 test("after a tailored CV: interview prep from the CV, and the job saved in My Applications on this device", async ({ page }) => {
   await page.route(API, async (route) => {
+    if (isMe(route)) return route.fulfill({ status: 200, json: ME_OWNER });
+    if (route.request().url().endsWith("/review")) return route.fulfill({ status: 200, json: REVIEW });   // the owner's account checks the match by itself
     if (route.request().url().endsWith("/interview")) return route.fulfill({ status: 200, json: { questions: [{ question: "Tell us about your test automation.", why: "The role is about Playwright.", answer: "At Northwind I built the Playwright suite." }], ask: ["How do you release?"], thanks: { subject: "Thank you", body: "Dear [Name], thank you." }, cost: "$0.003", balance: "$4.75" } });
     route.fulfill({ status: 200, json: await answer(page) });
   });
@@ -257,7 +264,6 @@ test("after a tailored CV: interview prep from the CV, and the job saved in My A
   await page.evaluate(() => localStorage.removeItem("applications"));
   await fillForm(page);
   await page.locator("#tailor").click();
-  await ownerPass(page, "right");
   await expect(page.locator("#apps")).toBeVisible();
   await expect(page.locator("#app-list li")).toHaveCount(1);
   await page.locator("#app-list select").selectOption("applied");
@@ -413,28 +419,30 @@ test.describe("invite codes and People", () => {
     await page.getByRole("tab", { name: "Sign In" }).click(); await expect(page.locator("#pane-new")).toBeHidden();
     await page.getByRole("button", { name: "Sign In With Face ID / Touch ID" }).click();
     await expect(page.locator("#acct")).toHaveText("4 credits"); expect(asked).toEqual([{ mode: "signin", name: "" }]);
-    // the owner's device: an invite link doesn't ask the owner to sign in
-    await page.evaluate(() => localStorage.setItem("pass", "right")); await page.goto("/?lang=en&invite=ABCDEFGH"); await page.waitForTimeout(400);
+    // already signed in: an invite link doesn't ask to sign in again
+    await page.unroute(API); await page.route(API, (route) => route.fulfill({ status: 200, json: { ...ME_OWNER, owner: false, credits: 4 } }));
+    await page.goto("/?lang=en&invite=ABCDEFGH"); await ready(page); await page.waitForTimeout(400);
     await expect(page.locator("#sign-dialog")).toBeHidden();
   });
   test("People: only on the owner's device; New Invite Link, Copy Link, and Remove that asks twice", async ({ page, browserName }, info) => {
     let invites = [{ code: "USEDCODE", created: "2026-11-10T10:00:00Z", usedBy: "u1", usedName: "Alex", usedAt: "2026-11-10T11:00:00Z" }], users = [{ id: "u1", name: "Alex", created: "2026-11-10T11:00:00Z", credits: 2 }, { id: "u2", name: "Test Account", created: "2026-11-11T09:00:00Z", credits: 1 }];
-    const calls = []; let fail = 0;
+    const calls = []; let fail = 0, me = { ...ME_OWNER, owner: false, credits: 2 };
     await page.route(API, async (route) => {
       const path = new URL(route.request().url()).pathname, body = route.request().postDataJSON() || {};
-      if (path === "/me") return route.fulfill({ status: 200, json: ME_OUT });
+      if (path === "/me") return route.fulfill({ status: 200, json: me });
       if (!path.startsWith("/admin/")) return route.fulfill({ status: 404, json: {} });
       calls.push(path);
-      if (route.request().headers()["x-passcode"] !== "right") return route.fulfill({ status: 401, json: { error: "passcode" } });
+      if (!me.owner || route.request().headers()["x-passcode"]) return route.fulfill({ status: 401, json: { error: "passcode" } });   // the owner's session, never a passcode
       if (fail) { fail--; return route.fulfill({ status: 500, json: {} }); }
       if (path === "/admin/invite") { await new Promise((r) => setTimeout(r, 250)); invites = [{ code: "NEWC" + (2000 + invites.length), created: new Date().toISOString() }, ...invites]; }
       if (path === "/admin/invite/delete") invites = invites.filter((i) => i.code !== body.code);
       if (path === "/admin/user/delete") users = users.filter((u) => u.id !== body.id);
       route.fulfill({ status: 200, json: { users, invites } });
     });
-    await page.goto("/?lang=en"); await expect(page.locator("#people-btn")).toBeHidden();
-    await page.evaluate(() => localStorage.setItem("pass", "right")); await page.reload();
-    await ready(page); await page.locator("#people-btn").click(); await expect(page.locator("#people")).toBeVisible();
+    await page.goto("/?lang=en"); await ready(page); await expect(page.locator("#acct")).toHaveText("2 credits");
+    await expect(page.locator("#people-btn")).toBeHidden(); await expect(page.locator("#model-row")).toBeHidden();   // an invited account: no People, no model picker
+    me = ME_OWNER; await page.reload(); await ready(page); await expect(page.locator("#acct")).toHaveText("Unlimited");
+    await page.locator("#people-btn").click(); await expect(page.locator("#people")).toBeVisible();
     await expect(page.locator("#pp-invites li")).toHaveText([/USED-CODE.*Used by Alex · 10 Nov 2026/]); await expect(page.locator("#pp-invites .pp-copy")).toHaveCount(0);
     await expect(page.locator("#pp-users li")).toHaveText([/Alex.*2 credits · since 10 Nov 2026/, /Test Account.*1 credit · since 11 Nov 2026/]);
     // New Invite Link, double tapped: one new code
@@ -458,18 +466,19 @@ test.describe("invite codes and People", () => {
     const axe = await new AxeBuilder({ page }).include("#people").analyze(); expect(axe.violations.filter((v) => ["serious", "critical"].includes(v.impact)).map((v) => v.id)).toEqual([]);
     if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + "/people-" + info.project.name + ".png" });
     await page.locator("#people-close").click(); await expect(page.locator("#people")).toBeHidden();
-    // a wrong owner passcode: People says so and shows nothing
-    await page.evaluate(() => localStorage.setItem("pass", "nope")); await page.reload(); await ready(page); await page.locator("#people-btn").click();
-    await expect(page.locator("#pp-err")).toBeVisible(); await expect(page.locator("#pp-users li")).toHaveText(["No accounts yet."]);
+    // the owner's own row: marked, with no Remove
+    users = [{ id: "u0", name: "Ivo", created: "2026-11-09T09:00:00Z", credits: 0, owner: true }, ...users]; await page.locator("#people-btn").click();
+    const mine = page.locator("#pp-users li", { hasText: "Ivo" }); await expect(mine).toContainText("Owner · unlimited"); await expect(mine.locator(".pp-remove")).toHaveCount(0);
   });
 });
 
 // APP-DR-003 round 3: the sign-in window is two clear tabs; every window shares one head, one field style, one rhythm
 test.describe("the windows: sign in, wallet and People", () => {
   const ME = (signedIn) => ({ signedIn, name: "Alex", credits: 2, start: 5, prices: { "/tailor": 3, "/interview": 2, "/review": 0 }, packs: [{ id: "p10", credits: 10, eur: 4 }, { id: "p25", credits: 25, eur: 9 }, { id: "p60", credits: 60, eur: 19 }] });
-  const serve = (page, signedIn, signin = 200) => page.route(API, (route) => {
+  const serve = (page, signedIn, signin = 200, owner = false) => page.route(API, (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === "/me") return route.fulfill({ status: 200, json: ME(signedIn) });
+    if (path === "/me") return route.fulfill({ status: 200, json: { ...ME(signedIn), owner } });
+    if (path === "/account/owner") return route.fulfill(route.request().headers()["x-passcode"] === "right" ? { status: 200, json: { ...ME(true), owner: true } } : { status: 401, json: { error: "passcode" } });
     if (path === "/account/options") return route.fulfill({ status: 200, json: { challenge: "AAAA", rpId: "localhost", allowCredentials: [] } });
     if (path === "/account/signin") return route.fulfill(signin === 200 ? { status: 200, json: ME(true) } : { status: 401, json: { error: "passkey_wrong" } });
     if (path.startsWith("/admin/")) return route.fulfill({ status: 200, json: { users: [{ id: "u1", name: "A Very Long First Name That Goes On And On", created: "2026-11-10T11:00:00Z", credits: 12 }], invites: [{ code: "ABCDEFGH", created: "2026-11-10T10:00:00Z" }, { code: "USEDCODE", created: "2026-11-09T10:00:00Z", usedBy: "u1", usedName: "A Very Long First Name That Goes On And On", usedAt: "2026-11-10T11:00:00Z" }] } });
@@ -496,12 +505,13 @@ test.describe("the windows: sign in, wallet and People", () => {
     await ready(page); await page.locator("#acct").click(); await expect(page.locator("#pane-new")).toBeVisible(); await tidy(page, "sign-dialog"); await shot("new");
     await page.locator("#sign-create").click(); await expect(page.locator("#sign-err")).toBeVisible(); await tidy(page, "sign-dialog");      // with the error showing
     await page.locator("#tab-in").click(); await expect(page.locator("#sign-err")).toBeHidden(); await tidy(page, "sign-dialog"); await shot("in");
-    await page.locator("#sign-dialog .owner summary").click(); await tidy(page, "sign-dialog"); await shot("owner");
+    await expect(page.locator("#sign-dialog input[type=password]")).toHaveCount(0);                                 // no owner passcode in the sign-in window
     await page.locator("#sign-close").click(); await expect(page.locator("#sign-dialog")).toBeHidden();
-    await page.evaluate(() => localStorage.setItem("pass", "right")); await page.reload();
-    await ready(page); await page.locator("#people-btn").click(); await expect(page.locator("#pp-users li")).toHaveCount(1); await tidy(page, "people"); await shot("people");
+    await page.unroute(API); await serve(page, true, 200, true); await page.reload();
+    await ready(page); await page.locator("#acct").click(); await expect(page.locator("#wallet-left")).toContainText(lang === "en" ? "Unlimited" : "Ilimitado"); await tidy(page, "wallet"); await shot("wallet-owner"); await page.locator("#wallet-close").click();
+    await page.locator("#people-btn").click(); await expect(page.locator("#pp-users li")).toHaveCount(1); await tidy(page, "people"); await shot("people");
     await page.locator("#people-close").click(); await expect(page.locator("#people")).toBeHidden();
-    await page.evaluate(() => localStorage.removeItem("pass")); await page.unroute(API); await serve(page, true); await page.reload();
+    await page.unroute(API); await serve(page, true); await page.reload();
     await ready(page); await page.locator("#acct").click(); await expect(page.locator("#wallet")).toBeVisible(); await tidy(page, "wallet"); await shot("wallet");
     await page.locator("#wallet-close").click(); await expect(page.locator("#wallet")).toBeHidden();
   });
@@ -532,10 +542,28 @@ test.describe("the windows: sign in, wallet and People", () => {
     expect(asked.filter((b) => b.mode === "create")).toEqual([]);
     await page.locator("#sign-name").fill("Alex"); await page.locator("#sign-invite").fill("abcd-efgh"); await page.locator("#sign-invite").press("Enter");
     await expect.poll(() => asked.filter((b) => b.mode === "create")).toEqual([{ mode: "create", name: "Alex", invite: "abcd-efgh" }]);
-    // the owner's passcode still gets in, and its button says what it does
-    await page.locator("#sign-dialog .owner summary").click(); await expect(page.locator("#pass-ok")).toHaveText("Use Passcode");
-    await page.locator("#pass").fill("right"); await page.locator("#pass-ok").click();
-    await expect(page.locator("#sign-dialog")).toBeHidden(); await expect(page.locator("#people-btn")).toBeVisible(); await expect(page.locator("#acct")).toBeHidden();
+  });
+  test("the owner's account: made once at /?owner with the passcode (wrong one says so), then People and Unlimited with no passcode kept", async ({ page }) => {
+    await serve(page, true); await page.goto("/?lang=en"); await ready(page);
+    await page.locator("#acct").click(); await expect(page.locator("#wallet")).toBeVisible(); await expect(page.locator("#claim")).toBeHidden();   // never offered on the plain address
+    await page.locator("#wallet-close").click();
+    await page.goto("/?lang=en&owner"); await ready(page); await expect(page.locator("#wallet")).toBeVisible(); await expect(page.locator("#claim")).toBeVisible();
+    await page.locator("#pass").fill("wrong"); await page.locator("#pass-ok").click();
+    await expect(page.locator("#pass-err")).toBeVisible(); await expect(page.locator("#people-btn")).toBeHidden();
+    await page.locator("#pass").fill("right"); await page.locator("#pass-ok").dblclick();
+    await expect(page.locator("#claim")).toBeHidden(); await expect(page.locator("#wallet-left")).toContainText("Unlimited");
+    await page.locator("#wallet-close").click(); await expect(page.locator("#acct")).toHaveText("Unlimited"); await expect(page.locator("#people-btn")).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem("pass") || "")).toBe("");
+  });
+  test("a device that still holds the old passcode: signing in makes that account the owner's by itself, and the passcode is forgotten", async ({ page }) => {
+    await serve(page, true); await page.goto("/?lang=en"); await ready(page);
+    await page.evaluate(() => localStorage.setItem("pass", "right")); await page.reload(); await ready(page);
+    await expect(page.locator("#acct")).toHaveText("Unlimited"); await expect(page.locator("#people-btn")).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem("pass") || "")).toBe("");
+    // an old passcode that is wrong is forgotten too, and nothing else changes
+    await page.evaluate(() => localStorage.setItem("pass", "stale")); await page.reload(); await ready(page);
+    await expect(page.locator("#acct")).toHaveText("2 credits"); await expect(page.locator("#people-btn")).toBeHidden();
+    expect(await page.evaluate(() => localStorage.getItem("pass") || "")).toBe("");
   });
 });
 
@@ -565,12 +593,12 @@ test.describe("every screen of the app is tidy", () => {
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });
     await page.route(API, async (route) => {
       const path = new URL(route.request().url()).pathname;
-      if (path === "/me") return route.fulfill({ status: 200, json: { signedIn: false, start: 5, prices: { "/tailor": 3, "/interview": 2, "/review": 0 }, packs: [] } });
+      if (path === "/me") return route.fulfill({ status: 200, json: ME_OWNER });
       if (path === "/review") return route.fulfill({ status: 200, json: REVIEW });
       if (path === "/interview") return route.fulfill({ status: 200, json: { questions: [{ question: "Tell us about your test automation.", why: "The role is about Playwright.", answer: "At Northwind I built the Playwright suite." }], ask: ["How do you release?"], thanks: { subject: "Thank you", body: "Dear [Name], thank you." }, cost: "$0.003", balance: "$4.75" } });
       route.fulfill({ status: 200, json: await answer(page) });
     });
-    await page.goto("/?lang=en"); await ready(page); await page.evaluate(() => { localStorage.setItem("pass", "right"); localStorage.removeItem("applications"); }); await page.reload(); await ready(page);
+    await page.goto("/?lang=en"); await ready(page); await page.evaluate(() => { localStorage.removeItem("applications"); }); await page.reload(); await ready(page);
     await sweep(page, `step 1 ${scheme}`);
     await page.locator("#paste-toggle").click(); await page.locator("#cv-text").fill(CV); await sweep(page, `step 1 filled ${scheme}`);
     await page.locator("#next").click(); await sweep(page, `step 2 ${scheme}`);

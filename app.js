@@ -238,15 +238,26 @@ function showCredit(b) { credit = b; $("credit").hidden = false; $("credit").tex
 let acct = { signedIn: false, credits: 0, prices: { "/tailor": 3, "/interview": 2, "/review": 0 }, packs: [], start: 5 };
 const toBuf = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
 const toB64u = (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-const acctCall = async (path, body) => { const r = await fetch(`${API}${path}`, { method: body ? "POST" : "GET", credentials: "include", headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined }); const d = await r.json().catch(() => ({})); if (!r.ok) throw d; return d; };
+const acctCall = async (path, body, pass) => { const r = await fetch(`${API}${path}`, { method: body ? "POST" : "GET", credentials: "include", headers: body ? { "content-type": "application/json", ...(pass ? { "x-passcode": pass } : {}) } : {}, body: body ? JSON.stringify(body) : undefined }); const d = await r.json().catch(() => ({})); if (!r.ok) throw d; return d; };
 function paintAcct() {
   const b = $("acct"); if (!b) return;
-  $("people-btn").hidden = !store.get("pass");            // People (invite codes, accounts) is the owner's
-  if (store.get("pass")) { b.hidden = true; return; }   // the owner's device shows the dollar credit instead
+  const boss = !!(acct.signedIn && acct.owner);
+  $("people-btn").hidden = !boss;                         // People (invite codes, accounts) and the model picker are the owner's account's
+  $("model-row").hidden = !boss;
   b.hidden = false;
-  b.textContent = acct.signedIn ? (acct.credits === 1 ? w.acctCredit1 : w.acctCredits.replace("{n}", acct.credits)) : w.acctIn;
+  b.textContent = !acct.signedIn ? w.acctIn : boss ? w.acctUnlimited : acct.credits === 1 ? w.acctCredit1 : w.acctCredits.replace("{n}", acct.credits);
 }
-async function loadAcct() { try { acct = { ...acct, ...(await acctCall("/me")) }; } catch (_) {} paintAcct(); }
+async function loadAcct() { try { acct = { ...acct, ...(await acctCall("/me")) }; } catch (_) {} paintAcct(); await claimOwner(); }
+// The owner's passcode is no longer how Draft is used (APP-DR-003 round 4). A device that still holds it uses it once, quietly,
+// to make the signed-in account the owner's, and then forgets it.
+async function claimOwner(typed) {
+  const pass = typed || store.get("pass"); if (!pass || !acct.signedIn || acct.owner) return false;
+  try { const r = await fetch(`${API}/account/owner`, { method: "POST", credentials: "include", headers: { "content-type": "application/json", "x-passcode": pass }, body: "{}" });
+    if (r.ok) { acct = { ...acct, ...(await r.json()) }; store.set("pass", ""); paintAcct(); return true; }
+    if (r.status === 401) store.set("pass", "");          // a wrong or old passcode: forgotten, not tried again
+  } catch (_) {}
+  return false;
+}
 let signWait = null;
 function askSignIn() {
   return new Promise((resolve) => {
@@ -270,8 +281,8 @@ async function passkey(create) {
   try {
     const name = $("sign-name").value.trim(), invite = $("sign-invite").value.trim();
     // a new account needs an invite code (one code, one account): asked before Face ID, so nobody makes a passkey for nothing
-    if (create && !invite) { $("sign-err").hidden = false; $("sign-err").textContent = w.signNeedInvite; $("sign-invite").focus(); return; }
-    const o = await acctCall("/account/options", { mode: create ? "create" : "signin", name, ...(create ? { invite } : {}) });
+    if (create && !invite && !store.get("pass")) { $("sign-err").hidden = false; $("sign-err").textContent = w.signNeedInvite; $("sign-invite").focus(); return; }
+    const o = await acctCall("/account/options", { mode: create ? "create" : "signin", name, ...(create ? { invite } : {}) }, create && !invite ? store.get("pass") : "");
     let data;
     if (create) {
       const c = await navigator.credentials.create({ publicKey: { ...o, challenge: toBuf(o.challenge), user: { ...o.user, id: toBuf(o.user.id) } } });
@@ -280,7 +291,7 @@ async function passkey(create) {
       const c = await navigator.credentials.get({ publicKey: { ...o, challenge: toBuf(o.challenge) } });
       data = await acctCall("/account/signin", { id: c.id, clientDataJSON: toB64u(c.response.clientDataJSON), authenticatorData: toB64u(c.response.authenticatorData), signature: toB64u(c.response.signature) });
     }
-    acct = { ...acct, ...data }; store.set("hadAcct", "1"); signDone("account");
+    acct = { ...acct, ...data }; store.set("hadAcct", "1"); await claimOwner(); if (acct.owner) store.set("pass", ""); signDone("account");
   } catch (e) { if (!(e && e.name === "NotAllowedError")) { $("sign-err").hidden = false; $("sign-err").textContent = e && e.error === "invite" ? w.signBadInvite : e && e.error === "invite_used" ? w.signUsedInvite : e && e.error === "passkey_wrong" ? w.signNoAcct : w.signFail; if (e && /^invite/.test(e.error || "")) $("sign-invite").focus(); } }
   finally { signing = false; $("sign-create").disabled = $("sign-have").disabled = false; }
 }
@@ -293,10 +304,17 @@ $("sign-tabs").addEventListener("keydown", (e) => { if (e.key === "ArrowLeft" ||
 for (const id of ["sign-invite", "sign-name"]) $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); passkey(true); } });
 $("sign-create").addEventListener("click", () => passkey(true));
 $("sign-have").addEventListener("click", () => passkey(false));
-$("pass-form").addEventListener("submit", (e) => { e.preventDefault(); const v = $("pass").value; if (v) { store.set("pass", v); signDone("pass"); } });
+// the one-time step that makes this account the owner's: only offered at draft…/?owner, in the wallet of a signed-in account
+const wantsOwner = new URLSearchParams(location.search).has("owner");
+let claiming = false;
+$("pass-form").addEventListener("submit", async (e) => { e.preventDefault(); const v = $("pass").value; if (!v || claiming) return; claiming = true; $("pass-ok").disabled = true; $("pass-err").hidden = true;
+  const ok = await claimOwner(v); claiming = false; $("pass-ok").disabled = false; $("pass").value = "";
+  if (ok) openWallet(0); else $("pass-err").hidden = false; });
 function openWallet(need) {
   $("wallet-title").textContent = need ? w.walletEmpty : w.walletTitle;
-  $("wallet-left").textContent = w.walletLeft.replace("{n}", acct.credits);
+  $("wallet-left").textContent = acct.owner ? w.walletUnlimited : w.walletLeft.replace("{n}", acct.credits);
+  $("claim").hidden = !(wantsOwner && acct.signedIn && !acct.owner); $("pass-err").hidden = true;
+  $("packs").hidden = !!acct.owner; for (const h3 of $("wallet").querySelectorAll("h3")) if (h3.dataset.w === "walletPacks") h3.hidden = !!acct.owner; { const soon = $("wallet").querySelector('[data-w="packSoon"]'); if (soon) soon.hidden = !!acct.owner; }
   $("wallet-need").hidden = !need; if (need) $("wallet-need").textContent = w.walletNeed.replace("{p}", need).replace("{n}", acct.credits);
   const pr = acct.prices || {};
   $("prices").innerHTML = [["priceTailor", pr["/tailor"]], ["priceInterview", pr["/interview"]], ["priceReview", pr["/review"]]].map(([k, n]) => `<li><span>${esc(w[k])}</span><b>${n ? esc(w.nCredits.replace("{n}", n)) : esc(w.free)}</b></li>`).join("");
@@ -308,7 +326,7 @@ $("wallet-close").addEventListener("click", () => $("wallet").close());
 $("sign-out").addEventListener("click", async () => { try { await acctCall("/account/signout", {}); } catch (_) {} acct = { ...acct, signedIn: false, credits: 0 }; $("wallet").close(); paintAcct(); });
 $("acct").addEventListener("click", () => acct.signedIn ? openWallet(0) : askSignIn());
 // ---- People (APP-DR-003 round 2): the owner makes invite links, and sees or removes accounts ----
-const ownerCall = async (path, body = {}) => { const r = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json", "x-passcode": store.get("pass") || "" }, body: JSON.stringify(body) }); const d = await r.json().catch(() => ({})); if (!r.ok) throw { status: r.status, ...d }; return d; };
+const ownerCall = async (path, body = {}) => { const r = await fetch(`${API}${path}`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); const d = await r.json().catch(() => ({})); if (!r.ok) throw { status: r.status, ...d }; return d; };
 const ppDay = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString(lang === "pt" ? "pt-PT" : "en-GB", { day: "numeric", month: "short", year: "numeric" }); };
 const inviteLink = (code) => `${location.origin}/?invite=${code}`;
 const showCode = (c) => String(c).replace(/^(.{4})(.+)$/, "$1-$2");
@@ -326,12 +344,12 @@ function paintPeople() {
     return row(showCode(i.code), i.usedBy ? w.ppUsed.replace("{n}", i.usedName || "?").replace("{d}", ppDay(i.usedAt)) : w.ppFree, ...acts);
   }) : [el("li", "pp-none", w.ppNoInvites)]));
   $("pp-users").replaceChildren(...(ppData.users.length ? ppData.users.map((u) =>
-    row(u.name || "Draft", (u.credits === 1 ? w.ppAcct1 : w.ppAcct.replace("{c}", u.credits)).replace("{d}", ppDay(u.created)), remove("u:" + u.id, () => ppRun("/admin/user/delete", { id: u.id })))) : [el("li", "pp-none", w.ppNoAccounts)]));
+    u.owner ? row(u.name || "Draft", w.ppOwner.replace("{d}", ppDay(u.created))) : row(u.name || "Draft", (u.credits === 1 ? w.ppAcct1 : w.ppAcct.replace("{c}", u.credits)).replace("{d}", ppDay(u.created)), remove("u:" + u.id, () => ppRun("/admin/user/delete", { id: u.id })))) : [el("li", "pp-none", w.ppNoAccounts)]));
 }
 async function ppRun(path, body) {
   if (ppBusy) return; ppBusy = true; $("pp-err").hidden = true; $("pp-new").disabled = true;
   try { const d = await ownerCall(path, body); ppData = { users: d.users || [], invites: d.invites || [] }; ppArmed = { key: "", at: 0 }; paintPeople(); }
-  catch (e) { $("pp-err").hidden = false; $("pp-err").textContent = e && e.status === 401 ? w.passWrong : w.ppFail; ppArmed = { key: "", at: 0 }; paintPeople(); }
+  catch (e) { $("pp-err").hidden = false; $("pp-err").textContent = e && e.status === 401 ? w.ppNotOwner : w.ppFail; ppArmed = { key: "", at: 0 }; paintPeople(); }
   finally { ppBusy = false; $("pp-new").disabled = false; }
 }
 $("people-btn").addEventListener("click", () => { $("people").querySelector(".hint").textContent = w.ppLead.replace("{n}", acct.start || 5); ppArmed = { key: "", at: 0 }; paintPeople(); if (!$("people").open) $("people").showModal(); ppRun("/admin/people"); });
@@ -339,7 +357,7 @@ $("pp-new").addEventListener("click", () => ppRun("/admin/invite"));
 $("people-close").addEventListener("click", () => $("people").close());
 // An invite link (?invite=CODE) opens the sign-in window with the code filled in
 const inviteFromLink = (new URLSearchParams(location.search).get("invite") || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 24);
-loadAcct().then(() => { if (inviteFromLink && !acct.signedIn && !store.get("pass")) askSignIn(); });
+loadAcct().then(() => { if (!acct.signedIn && (inviteFromLink || wantsOwner)) askSignIn().then((how) => { if (how && wantsOwner && !acct.owner) openWallet(0); }); else if (wantsOwner && !acct.owner) openWallet(0); });
 
 // ---- tailoring ----
 // Every call to the AI service: the passcode once per device, and plain-language errors
@@ -351,13 +369,11 @@ async function api(path, body) {
     if (!res.ok) throw { say: res.status === 429 ? w.slowDown : w.linkFail };
     return data;
   }
-  // the owner's passcode, or the signed-in account (cookie); signed out: sign in first, then carry on
-  let pass = store.get("pass");
-  if (!pass && !acct.signedIn) { const how = await askSignIn(); if (!how) return null; pass = store.get("pass"); }
-  const res = await fetch(`${API}${path}`, { method: "POST", credentials: "include", headers: { "content-type": "application/json", ...(pass ? { "x-passcode": pass } : {}) }, body: JSON.stringify(body) });
+  // the signed-in account pays (cookie); signed out: sign in first, then carry on
+  if (!acct.signedIn) { const how = await askSignIn(); if (!how) return null; }
+  const res = await fetch(`${API}${path}`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && data.error === "signin") { acct.signedIn = false; paintAcct(); const how = await askSignIn(); if (!how) return null; return api(path, body); }
-  if (res.status === 401) { store.set("pass", ""); paintAcct(); throw { say: w.passWrong }; }
   if (data.balance) showCredit(data.balance);
   if (typeof data.credits === "number") { acct.credits = data.credits; paintAcct(); }
   if (res.status === 429 && data.error === "locked") throw { say: w.locked };
@@ -375,7 +391,7 @@ function showReview() {
   review = null;
   $("summary").hidden = false;
   $("review").innerHTML = `<p class="hint">${esc(w.checkCost)}</p><button type="button" class="btn ghost" id="check">${esc(w.checkBtn)}</button>`;
-  if (store.get("pass")) runCheck();                                   // the owner's device: check straight away
+  if (acct.signedIn && acct.owner) runCheck();                         // the owner's account: check straight away
 }
 async function runCheck() {
   $("review").innerHTML = `<p class="hint working">${esc(w.checking)}</p>`;
