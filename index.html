@@ -32,6 +32,7 @@
   <a class="brand" href="/" data-w="brand">draftdoivo</a>
   <span class="tools">
     <button class="mode" id="mode" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-moon" d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/><g class="i-sun"><circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></g></svg></button>
+    <button class="acct" id="acct" type="button"></button>
     <button class="lang" id="lang" type="button">PT</button>
   </span>
 </header>
@@ -120,14 +121,28 @@
   </form>
   <p class="example-line"><span data-w="exampleLead"></span> <button type="button" class="link" id="example" data-w="example"></button></p>
 
-  <dialog id="pass-dialog" class="pass">
-    <form method="dialog" id="pass-form">
-      <label for="pass" data-w="passcode"></label>
-      <input id="pass" type="password" autocomplete="current-password" required>
-      <p class="hint" data-w="passHint"></p>
-      <p class="err" id="pass-err" hidden data-w="passWrong"></p>
-      <div class="go"><button class="btn" value="ok" data-w="tailor"></button></div>
-    </form>
+  <dialog id="sign-dialog" class="pass" aria-labelledby="sign-title">
+    <h2 id="sign-title" data-w="signTitle"></h2>
+    <p class="hint" id="sign-lead"></p>
+    <label for="sign-name" data-w="signName"></label>
+    <input id="sign-name" autocomplete="given-name" maxlength="40">
+    <div class="sign-btns"><button type="button" class="btn" id="sign-create" data-w="signCreate"></button><button type="button" class="btn ghost" id="sign-have" data-w="signHave"></button></div>
+    <p class="err" id="sign-err" role="status" hidden></p>
+    <details class="owner"><summary data-w="signOwner"></summary>
+      <form method="dialog" id="pass-form"><input id="pass" type="password" autocomplete="current-password" aria-label="Passcode"><p class="err" id="pass-err" hidden data-w="passWrong"></p><button class="btn ghost" value="ok" id="pass-ok" data-w="tailor"></button></form>
+    </details>
+    <button type="button" class="link quiet" id="sign-close" data-w="close"></button>
+  </dialog>
+  <dialog id="wallet" class="pass" aria-labelledby="wallet-title">
+    <h2 id="wallet-title"></h2>
+    <p class="wallet-left" id="wallet-left"></p>
+    <p class="err" id="wallet-need" hidden></p>
+    <h3 data-w="walletPrices"></h3>
+    <ul class="prices" id="prices"></ul>
+    <h3 data-w="walletPacks"></h3>
+    <div class="packs" id="packs"></div>
+    <p class="hint" data-w="packSoon"></p>
+    <div class="go"><button type="button" class="link quiet" id="sign-out" data-w="signOut"></button><button type="button" class="btn ghost" id="wallet-close" data-w="close"></button></div>
   </dialog>
 
   <section id="result" class="result" hidden aria-labelledby="result-title">

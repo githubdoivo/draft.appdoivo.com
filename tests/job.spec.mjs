@@ -9,6 +9,8 @@ const answer = async (page) => {
   return { cv: SAMPLE.cv, letter: SAMPLE.letter, keywords: SAMPLE.keywords, notes: { changes: ["Moved TypeScript up."], gaps: ["Accessibility testing"] }, cached: false, cost: "$0.0412", balance: "$4.76" };
 };
 // Walks the machine: Continue only works once the step is valid; Back returns
+// the owner's passcode now sits under "Owner passcode" in the sign-in window (APP-DR-003)
+const ownerPass = async (page, v) => { await page.locator("#sign-dialog .owner").evaluate((d) => { d.open = true; }); await page.locator("#pass").fill(v); await page.locator("#pass-form button").click(); };
 const CV = "Alex Morgan\nalex.morgan@example.com | +351 910 000 000\nQA Engineer, Northwind 2022 - present\n" + "Built Playwright and TypeScript test suites for checkout. ".repeat(12);
 const fillForm = async (page) => {
   await expect(page.locator("#next")).toBeDisabled();
@@ -76,6 +78,7 @@ test("colours: five, keyboard-reachable, and the CV follows the choice", async (
 test("tailoring: passcode, the answer, its cost, and the errors", async ({ page }) => {
   let calls = 0, reply = 200;
   await page.route(API, async (route) => {
+    if (route.request().method() === "GET") return route.fulfill({ status: 200, json: { signedIn: false } });   // the account lookup isn't a run
     calls++;
     if (route.request().headers()["x-passcode"] !== "right") return route.fulfill({ status: 401, json: { error: "passcode" } });
     if (reply === 402) return route.fulfill({ status: 402, json: { error: "credit", balance: "$0.00" } });
@@ -84,12 +87,10 @@ test("tailoring: passcode, the answer, its cost, and the errors", async ({ page 
   await page.goto("/?lang=en");
   await fillForm(page);
   await page.locator("#tailor").click();
-  await page.locator("#pass").fill("wrong");
-  await page.locator("#pass-form button").click();
+  await ownerPass(page, "wrong");
   await expect(page.locator("#status")).toHaveText("That passcode is not right.");
   await page.locator("#tailor").click();
-  await page.locator("#pass").fill("right");
-  await page.locator("#pass-form button").click();
+  await ownerPass(page, "right");
   await expect(page.locator("#result-note")).toHaveText("This run cost $0.0412. Credit left: $4.76.");
   await expect(page.locator("#notes")).toContainText("Accessibility testing");
   reply = 402;
@@ -103,8 +104,7 @@ test("when the AI service cannot be reached, it says so and points to the exampl
   await page.goto("/?lang=en");
   await fillForm(page);
   await page.locator("#tailor").click();
-  await page.locator("#pass").fill("x");
-  await page.locator("#pass-form button").click();
+  await ownerPass(page, "x");
   await expect(page.locator("#status")).toContainText("isn't connected yet");
 });
 
@@ -256,8 +256,7 @@ test("after a tailored CV: interview prep from the CV, and the job saved in My A
   await page.evaluate(() => localStorage.removeItem("applications"));
   await fillForm(page);
   await page.locator("#tailor").click();
-  await page.locator("#pass").fill("right");
-  await page.locator("#pass-form button").click();
+  await ownerPass(page, "right");
   await expect(page.locator("#apps")).toBeVisible();
   await expect(page.locator("#app-list li")).toHaveCount(1);
   await page.locator("#app-list select").selectOption("applied");
@@ -292,4 +291,30 @@ test("the window sits scrolled down by the strip above it, and the background co
     expect(bg.bottom, scheme).toBeGreaterThanOrEqual(vp.height);
     expect(bg.img, scheme).not.toBe("none");
   }
+});
+
+test("accounts: signed out, Tailor asks to sign in with Face ID; signed in, the pill shows credits; out of credits opens the wallet", async ({ page }) => {
+  let signedIn = false;
+  await page.route(API, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/me") return route.fulfill({ status: 200, json: signedIn ? { signedIn: true, name: "Alex", credits: 2, prices: { "/tailor": 3, "/interview": 2, "/review": 0 }, packs: [{ id: "p10", credits: 10, eur: 4 }] } : { signedIn: false, start: 5, prices: { "/tailor": 3, "/interview": 2, "/review": 0 }, packs: [{ id: "p10", credits: 10, eur: 4 }] } });
+    if (path === "/tailor") return route.fulfill({ status: 402, json: { error: "credit", credits: 2, price: 3 } });
+    route.fulfill({ status: 404, json: {} });
+  });
+  await page.goto("/?lang=en");
+  await expect(page.locator("#acct")).toHaveText("Sign In");
+  await fillForm(page);
+  await page.locator("#tailor").click();
+  await expect(page.locator("#sign-dialog")).toBeVisible();
+  await expect(page.locator("#sign-lead")).toContainText("5 free credits");
+  await expect(page.getByRole("button", { name: "Create My Account" })).toBeVisible();
+  await page.locator("#sign-close").click();
+  await expect(page.locator("#sign-dialog")).toBeHidden();
+  signedIn = true; await page.reload();                                         // the draft comes back on step 4
+  await expect(page.locator("#acct")).toHaveText("2 credits");
+  await page.locator("#tailor").click();
+  await expect(page.locator("#wallet")).toBeVisible();
+  await expect(page.locator("#wallet-title")).toHaveText("Fill Your Wallet");
+  await expect(page.locator("#wallet-need")).toHaveText("This needs 3 credits and you have 2.");
+  await expect(page.locator("#packs")).toContainText("10 credits · €4");
 });

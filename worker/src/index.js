@@ -2,7 +2,8 @@
 //   POST /job     { url }                          reads a job ad from its link (free)
 //   POST /review  { cv, job, company, ui }         a quick match check before paying for the CV (Haiku, ~$0.002)
 //   POST /tailor  { cv, job, company, model, choices }  the tailored CV and letter
-// Every call needs the header x-passcode.
+// Every paid call needs the owner's x-passcode or a signed-in account (session cookie, credits).
+//   GET /me, POST /account/options|create|signin|signout   accounts with Face ID / Touch ID (APP-DR-003)
 // The money rules live here, where nobody can change them from the browser:
 //  - a passcode (only the owner, for now), locked for an hour after 10 wrong tries
 //  - prepaid credit per account: each run's real cost is taken from its balance
@@ -121,7 +122,7 @@ const strList = (v, n, max) => (Array.isArray(v) ? v.slice(0, n).map((x) => clea
 function cors(req, env) {
   const origin = req.headers.get("origin") || "";
   const ok = env.ALLOWED_ORIGINS.split(",").includes(origin);
-  return ok ? { "access-control-allow-origin": origin, "access-control-allow-headers": "content-type, x-passcode", "access-control-allow-methods": "POST, OPTIONS", "access-control-max-age": "600", vary: "origin" } : {};
+  return ok ? { "access-control-allow-origin": origin, "access-control-allow-credentials": "true", "access-control-allow-headers": "content-type, x-passcode", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-max-age": "600", vary: "origin" } : {};
 }
 
 // Who pays for this run. Today: the owner, by passcode. Later: an account with prepaid credits.
@@ -129,7 +130,123 @@ async function account(req, env) {
   const pass = req.headers.get("x-passcode") || "";
   // Both sides hashed, so the comparison always takes the same time
   if (pass && env.PASSCODE && sameText(await sha256(pass), await sha256(env.PASSCODE))) return "owner";
-  return null;
+  const u = await sessionUser(req, env);
+  return u ? "u:" + u.id : null;
+}
+
+// ---- accounts (APP-DR-003 part 1): Face ID / Touch ID passkeys, a session cookie, credits ----
+// Keys in KV: user:{id} {id,name,created}, credits:{id} (whole credits), pk:{credId} {user,jwk,alg},
+// sess:{token} {user} (30 days), chal:{challenge} (5 minutes, used once).
+const START_CREDITS = 5;
+const PRICES = { "/tailor": 3, "/interview": 2, "/review": 0 };     // whole credits per service
+const PACKS = [{ id: "p10", credits: 10, eur: 4 }, { id: "p25", credits: 25, eur: 9 }, { id: "p60", credits: 60, eur: 19 }];
+const SESSION_DAYS = 30;
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = (s) => Uint8Array.from(atob(String(s).replace(/-/g, "+").replace(/_/g, "/") + "===".slice((String(s).length + 3) % 4)), (c) => c.charCodeAt(0));
+const rand = (n = 32) => b64u(crypto.getRandomValues(new Uint8Array(n)));
+function cbor(bytes, pos = 0) {
+  const b = bytes[pos++], major = b >> 5, info = b & 31; let len = info;
+  if (info === 24) len = bytes[pos++];
+  else if (info === 25) { len = (bytes[pos] << 8) | bytes[pos + 1]; pos += 2; }
+  else if (info === 26) { len = ((bytes[pos] << 24) >>> 0) + (bytes[pos + 1] << 16) + (bytes[pos + 2] << 8) + bytes[pos + 3]; pos += 4; }
+  else if (info > 26) throw new Error("cbor");
+  if (major === 0) return [len, pos];
+  if (major === 1) return [-1 - len, pos];
+  if (major === 2) return [bytes.slice(pos, pos + len), pos + len];
+  if (major === 3) return [new TextDecoder().decode(bytes.slice(pos, pos + len)), pos + len];
+  if (major === 4) { const a = []; for (let i = 0; i < len; i++) { let v; [v, pos] = cbor(bytes, pos); a.push(v); } return [a, pos]; }
+  if (major === 5) { const m = new Map(); for (let i = 0; i < len; i++) { let k, v; [k, pos] = cbor(bytes, pos); [v, pos] = cbor(bytes, pos); m.set(k, v); } return [m, pos]; }
+  if (major === 7) return [info === 21 ? true : info === 20 ? false : null, pos];
+  throw new Error("cbor");
+}
+function coseToJwk(m) {
+  if (m.get(1) === 2 && m.get(3) === -7) return { alg: -7, jwk: { kty: "EC", crv: "P-256", x: b64u(m.get(-2)), y: b64u(m.get(-3)), ext: true } };
+  if (m.get(1) === 3 && m.get(3) === -257) return { alg: -257, jwk: { kty: "RSA", n: b64u(m.get(-1)), e: b64u(m.get(-2)), alg: "RS256", ext: true } };
+  throw new Error("unsupported_key");
+}
+function derToRaw(der) {
+  let p = 2; if (der[1] & 0x80) p += der[1] & 0x7f;
+  const part = () => { p++; const n = der[p++]; let v = der.slice(p, p + n); p += n; while (v.length > 32 && v[0] === 0) v = v.slice(1); const o = new Uint8Array(32); o.set(v, 32 - v.length); return o; };
+  const r = part(), s = part(), out = new Uint8Array(64); out.set(r); out.set(s, 32); return out;
+}
+const cookieOf = (req, name) => { const m = (req.headers.get("cookie") || "").match(new RegExp("(?:^|;\\s*)" + name + "=([^;]+)")); return m ? m[1] : ""; };
+const sessionCookie = (token, days) => `dsess=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${days * 86400}`;
+async function sessionUser(req, env) {
+  const t = cookieOf(req, "dsess"); if (!t || t.length > 100) return null;
+  const s = await env.JOB.get(`sess:${t}`, "json"); if (!s) return null;
+  return await env.JOB.get(`user:${s.user}`, "json");
+}
+const credits = async (env, uid) => Number((await env.JOB.get(`credits:${uid}`)) || 0);
+// the page's own origin is the passkey's site (draft.appdoivo.com, or localhost when testing)
+const siteOf = (req, env) => { const o = req.headers.get("origin") || ""; return env.ALLOWED_ORIGINS.split(",").includes(o) ? new URL(o) : null; };
+async function checkClient(env, site, clientDataB64, authData, type) {
+  const cd = JSON.parse(new TextDecoder().decode(unb64u(clientDataB64)));
+  if (cd.type !== type || cd.origin !== site.origin) throw new Error("bad_client");
+  const ck = `chal:${cd.challenge}`;
+  if (!(await env.JOB.get(ck))) throw new Error("bad_challenge");
+  await env.JOB.delete(ck);
+  const rpHash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(site.hostname)));
+  if (!rpHash.every((v, i) => v === authData[i])) throw new Error("bad_rp");
+  if ((authData[32] & 0x05) !== 0x05) throw new Error("not_verified");
+}
+async function accountApi(req, env, url, h) {
+  const site = siteOf(req, env);
+  const me = async (u) => ({ signedIn: true, name: u.name, credits: await credits(env, u.id), prices: PRICES, packs: PACKS });
+  if (url.pathname === "/me" && req.method === "GET") {
+    const u = await sessionUser(req, env);
+    return json(u ? await me(u) : { signedIn: false, prices: PRICES, packs: PACKS, start: START_CREDITS }, 200, h);
+  }
+  if (req.method !== "POST" || !site) return json({ error: "not_found" }, 404, h);
+  let body = {}; try { body = JSON.parse((await req.text()) || "{}"); } catch (_) { return json({ error: "bad_request" }, 400, h); }
+  const ip = req.headers.get("cf-connecting-ip") || "?", rl = `acctrl:${ip}`, n = Number((await env.JOB.get(rl)) || 0);
+  if (n >= 30) return json({ error: "slow_down" }, 429, h);
+  await env.JOB.put(rl, String(n + 1), { expirationTtl: 3600 });
+  if (url.pathname === "/account/options") {
+    const challenge = rand(32); await env.JOB.put(`chal:${challenge}`, "1", { expirationTtl: 300 });
+    if (body.mode === "create") {
+      const uid = rand(12), name = clean(body.name, 40) || "Draft";
+      return json({ challenge, rp: { name: "draftdoivo", id: site.hostname }, user: { id: b64u(new TextEncoder().encode(uid)), name, displayName: name },
+        pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }], timeout: 300000, attestation: "none",
+        authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" } }, 200, h);
+    }
+    return json({ challenge, rpId: site.hostname, timeout: 300000, userVerification: "required", allowCredentials: [] }, 200, h);
+  }
+  if (url.pathname === "/account/create") {
+    try {
+      const [att] = cbor(unb64u(body.attestationObject)); const ad = att.get("authData");
+      await checkClient(env, site, body.clientDataJSON, ad, "webauthn.create");
+      if (!(ad[32] & 0x40)) throw new Error("no_key");
+      const idLen = (ad[53] << 8) | ad[54], credId = b64u(ad.slice(55, 55 + idLen));
+      const [cose] = cbor(ad, 55 + idLen); const { alg, jwk } = coseToJwk(cose);
+      const uid = new TextDecoder().decode(unb64u(body.userId || "")).slice(0, 40) || rand(12);
+      if (await env.JOB.get(`user:${uid}`)) throw new Error("exists");
+      const name = clean(body.name, 40) || "Draft";
+      await env.JOB.put(`user:${uid}`, JSON.stringify({ id: uid, name, created: new Date().toISOString() }));
+      await env.JOB.put(`credits:${uid}`, String(START_CREDITS));          // 5 free credits to start
+      await env.JOB.put(`pk:${credId}`, JSON.stringify({ user: uid, jwk, alg }));
+      const token = rand(32); await env.JOB.put(`sess:${token}`, JSON.stringify({ user: uid }), { expirationTtl: SESSION_DAYS * 86400 });
+      return json(await me({ id: uid, name }), 200, { ...h, "set-cookie": sessionCookie(token, SESSION_DAYS) });
+    } catch (_) { return json({ error: "passkey_failed" }, 400, h); }
+  }
+  if (url.pathname === "/account/signin") {
+    try {
+      const pk = await env.JOB.get(`pk:${String(body.id || "").slice(0, 400)}`, "json"); if (!pk) throw new Error("unknown");
+      const ad = unb64u(body.authenticatorData), cdRaw = unb64u(body.clientDataJSON);
+      await checkClient(env, site, body.clientDataJSON, ad, "webauthn.get");
+      const signed = new Uint8Array(ad.length + 32); signed.set(ad); signed.set(new Uint8Array(await crypto.subtle.digest("SHA-256", cdRaw)), ad.length);
+      const ec = pk.alg === -7, sig = unb64u(body.signature);
+      const key = await crypto.subtle.importKey("jwk", pk.jwk, ec ? { name: "ECDSA", namedCurve: "P-256" } : { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+      if (!(await crypto.subtle.verify(ec ? { name: "ECDSA", hash: "SHA-256" } : "RSASSA-PKCS1-v1_5", key, ec ? derToRaw(sig) : sig, signed))) throw new Error("bad_sig");
+      const u = await env.JOB.get(`user:${pk.user}`, "json"); if (!u) throw new Error("no_user");
+      const token = rand(32); await env.JOB.put(`sess:${token}`, JSON.stringify({ user: u.id }), { expirationTtl: SESSION_DAYS * 86400 });
+      return json(await me(u), 200, { ...h, "set-cookie": sessionCookie(token, SESSION_DAYS) });
+    } catch (_) { return json({ error: "passkey_wrong" }, 401, h); }
+  }
+  if (url.pathname === "/account/signout") {
+    const t = cookieOf(req, "dsess"); if (t) await env.JOB.delete(`sess:${t}`);
+    return json({ signedIn: false }, 200, { ...h, "set-cookie": sessionCookie("", 0) });
+  }
+  return json({ error: "not_found" }, 404, h);
 }
 
 // ---- credit: a prepaid balance per account, in dollars ----
@@ -196,6 +313,7 @@ export default {
     const h = cors(req, env);
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: h });
     const url = new URL(req.url);
+    if (url.pathname === "/me" || url.pathname.startsWith("/account/")) return accountApi(req, env, url, h);
     if (!["/tailor", "/review", "/job", "/interview"].includes(url.pathname) || req.method !== "POST") return json({ error: "not_found" }, 404, h);
     if (Number(req.headers.get("content-length") || 0) > 200_000) return json({ error: "too_large" }, 413, h);
 
@@ -218,7 +336,7 @@ export default {
       return found ? json({ ...found, text: found.text.slice(0, LIMITS.job) }, 200, h) : json({ error: "unreadable" }, 422, h);
     }
     const who = await account(req, env);
-    if (!who) { await env.JOB.put(failKey, String(fails + 1), { expirationTtl: 3600 }); return json({ error: "passcode" }, 401, h); }
+    if (!who) { if (req.headers.get("x-passcode")) { await env.JOB.put(failKey, String(fails + 1), { expirationTtl: 3600 }); return json({ error: "passcode" }, 401, h); } return json({ error: "signin" }, 401, h); }
 
     let input;
     // The size is checked on what actually arrived, not only on the header (which can be left out)
@@ -243,11 +361,14 @@ export default {
 
     // The same request again: the saved answer, free
     const key = `cache:${await sha256(JSON.stringify([url.pathname, model, cv, job, company, review ? ui : choices]))}`;
-    const left = await balance(env, who);
+    // an account pays a fixed number of credits per service, only when it works; the owner pays the real cost in dollars
+    const uid = who.startsWith("u:") ? who.slice(2) : null, price = PRICES[url.pathname] ?? 3;
+    const have = uid ? await credits(env, uid) : 0;
+    const left = uid ? 0 : await balance(env, who);
     const saved = await env.JOB.get(key, "json");
-    if (saved) return json({ ...saved, cached: true, cost: usd(0), balance: usd(left) }, 200, h);
+    if (saved) return json({ ...saved, cached: true, ...(uid ? { credits: have, price: 0 } : { cost: usd(0), balance: usd(left) }) }, 200, h);
 
-    if (left <= 0) return json({ error: "credit", balance: usd(left) }, 402, h);
+    if (uid ? have < price : left <= 0) return json({ error: "credit", ...(uid ? { credits: have, price } : { balance: usd(left) }) }, 402, h);
     const runsKey = `runs:${who}:${day()}`, runs = Number((await env.JOB.get(runsKey)) || 0);
     if (runs >= Number(env.DAILY_RUNS || 40)) return json({ error: "daily_limit" }, 429, h);
 
@@ -290,8 +411,8 @@ export default {
     await env.JOB.put(runsKey, String(runs + 1), { expirationTtl: 2 * 86400 });
 
     // What it cost, taken from the credit even when the answer is unusable (the tokens were spent)
-    const cost = costOf(m, res.usage), after = await charge(env, who, cost);
-    const paid = { cost: usd(cost), balance: usd(after) };
+    const cost = costOf(m, res.usage), after = uid ? 0 : await charge(env, who, cost);
+    let paid = uid ? { credits: have } : { cost: usd(cost), balance: usd(after) };
 
     if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") return json({ error: res.stop_reason, ...paid }, 502, h);
     const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("");
@@ -309,6 +430,7 @@ export default {
       out.letter = out.letter?.paragraphs?.length ? { ...out.letter, lang: out.cv.lang, name: out.cv.name, contact: out.cv.contact } : null;
     }
     await env.JOB.put(key, JSON.stringify(out), { expirationTtl: CACHE_DAYS * 86400 });
+    if (uid && price) { const now = Math.max(0, (await credits(env, uid)) - price); await env.JOB.put(`credits:${uid}`, String(now)); paid = { credits: now, price }; }
     return json({ ...out, cached: false, model, ...paid }, 200, h);
   },
 };

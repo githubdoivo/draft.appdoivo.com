@@ -73,3 +73,73 @@ test("ten wrong passcodes lock the address for an hour, even for the right passc
   assert.equal(r.status, 429);
   assert.equal((await r.json()).error, "locked");
 });
+
+// ---- accounts (APP-DR-003): a real passkey made here, so the whole path is checked ----
+const enc = new TextEncoder();
+const b64u = (b) => Buffer.from(b).toString("base64url");
+function cborEnc(v) {
+  const head = (major, n) => n < 24 ? [major << 5 | n] : n < 256 ? [major << 5 | 24, n] : [major << 5 | 25, n >> 8, n & 255];
+  if (typeof v === "number") return Uint8Array.from(v >= 0 ? head(0, v) : head(1, -1 - v));
+  if (typeof v === "string") { const b = enc.encode(v); return Uint8Array.from([...head(3, b.length), ...b]); }
+  if (v instanceof Uint8Array) return Uint8Array.from([...head(2, v.length), ...v]);
+  if (v instanceof Map) { const parts = [Uint8Array.from(head(5, v.size))]; for (const [k, x] of v) parts.push(cborEnc(k), cborEnc(x)); return Uint8Array.from(parts.flatMap((p) => [...p])); }
+  throw new Error("cbor");
+}
+async function makePasskey() {
+  const kp = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const jwk = await crypto.subtle.exportKey("jwk", kp.publicKey), credId = crypto.getRandomValues(new Uint8Array(16));
+  return { kp, credId, cose: cborEnc(new Map([[1, 2], [3, -7], [-1, 1], [-2, Buffer.from(jwk.x, "base64url")], [-3, Buffer.from(jwk.y, "base64url")]])) };
+}
+const rpHash = async () => new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(new URL(SITE).hostname)));
+const clientData = (type, challenge, origin = SITE) => enc.encode(JSON.stringify({ type, challenge, origin }));
+function rawToDer(raw) {   // WebCrypto signs r||s; passkeys send DER, which the worker turns back
+  const int = (b) => { let i = 0; while (i < b.length - 1 && b[i] === 0) i++; b = b.slice(i); if (b[0] & 0x80) b = Uint8Array.from([0, ...b]); return [2, b.length, ...b]; };
+  const r = int(raw.slice(0, 32)), s = int(raw.slice(32)); return Uint8Array.from([0x30, r.length + s.length, ...r, ...s]);
+}
+const cookieOf = (r) => (r.headers.get("set-cookie") || "").split(";")[0];
+
+test("accounts: Face ID creates an account with 5 credits; signing in works; a failed run costs nothing", async () => {
+  const me0 = await (await call("/me", { method: "GET" })).json();
+  assert.equal(me0.signedIn, false); assert.equal(me0.start, 5); assert.equal(me0.prices["/tailor"], 3);
+  // signed out: asked to sign in, and it doesn't count as a wrong passcode
+  const r0 = await call("/tailor", { body: { cv: "x".repeat(300), job: "y".repeat(100) } });
+  assert.equal(r0.status, 401); assert.equal((await r0.json()).error, "signin");
+  // create
+  const o = await (await call("/account/options", { body: { mode: "create", name: "Alex" } })).json();
+  assert.equal(o.rp.id, "draft.appdoivo.com");
+  const pk = await makePasskey();
+  const ad = Uint8Array.from([...(await rpHash()), 0x45, 0, 0, 0, 0, ...new Uint8Array(16), 0, 16, ...pk.credId, ...pk.cose]);
+  const att = cborEnc(new Map([["fmt", "none"], ["attStmt", new Map()], ["authData", ad]]));
+  const cr = await call("/account/create", { body: { name: "Alex", userId: o.user.id, clientDataJSON: b64u(clientData("webauthn.create", o.challenge)), attestationObject: b64u(att) } });
+  assert.equal(cr.status, 200); const acc = await cr.json(); assert.equal(acc.credits, 5); assert.equal(acc.name, "Alex");
+  const cookie = cookieOf(cr); assert.match(cookie, /^dsess=/);
+  // the same challenge can't be used twice
+  const again = await call("/account/create", { body: { name: "Alex", userId: o.user.id, clientDataJSON: b64u(clientData("webauthn.create", o.challenge)), attestationObject: b64u(att) } });
+  assert.equal(again.status, 400);
+  const me1 = await (await call("/me", { method: "GET", headers: { cookie } })).json(); assert.equal(me1.signedIn, true); assert.equal(me1.credits, 5);
+  // sign in with the passkey
+  const so = await (await call("/account/options", { body: {} })).json();
+  const ad2 = Uint8Array.from([...(await rpHash()), 0x05, 0, 0, 0, 1]), cd2 = clientData("webauthn.get", so.challenge);
+  const signed = Uint8Array.from([...ad2, ...new Uint8Array(await crypto.subtle.digest("SHA-256", cd2))]);
+  const sig = rawToDer(new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, pk.kp.privateKey, signed)));
+  const si = await call("/account/signin", { body: { id: b64u(pk.credId), clientDataJSON: b64u(cd2), authenticatorData: b64u(ad2), signature: b64u(sig) } });
+  assert.equal(si.status, 200); assert.equal((await si.json()).credits, 5);
+  // a tampered signature is refused
+  const so2 = await (await call("/account/options", { body: {} })).json(), cd3 = clientData("webauthn.get", so2.challenge);
+  const bad = await call("/account/signin", { body: { id: b64u(pk.credId), clientDataJSON: b64u(cd3), authenticatorData: b64u(ad2), signature: b64u(sig) } });
+  assert.equal(bad.status, 401);
+  // a run that fails (the fake AI key) takes no credits
+  const t = await call("/tailor", { headers: { cookie }, body: { cv: "Alex Morgan, QA engineer. ".repeat(20), job: "We need a QA engineer with Playwright. ".repeat(5) } });
+  assert.notEqual(t.status, 200);
+  assert.equal((await (await call("/me", { method: "GET", headers: { cookie } })).json()).credits, 5);
+  // sign out ends the session
+  await call("/account/signout", { headers: { cookie } });
+  assert.equal((await (await call("/me", { method: "GET", headers: { cookie } })).json()).signedIn, false);
+});
+
+test("accounts: a forged session or another site gets nothing", async () => {
+  const r = await call("/tailor", { headers: { cookie: "dsess=forged" }, body: { cv: "x".repeat(300), job: "y".repeat(100) } });
+  assert.equal(r.status, 401);
+  assert.equal((await call("/account/options", { origin: "https://evil.example", body: { mode: "create" } })).status, 404);
+  assert.equal((await call("/account/create", { body: { attestationObject: "!!", clientDataJSON: "!!" } })).status, 400);
+});

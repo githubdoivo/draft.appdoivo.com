@@ -302,3 +302,25 @@ textarea#cv-text { margin-top: 12px; }
 .sug input:checked::after { translate: 18px 0; }
 .sug .yes { font: 500 13px var(--mono); color: var(--muted); min-width: 4ch; }
 @media (prefers-reduced-motion: reduce) { .sug input::after { transition: none; } }
+
+/* account (APP-DR-003): the credits pill in the header, the sign-in window and the wallet */
+.acct { min-height: 44px; padding: 0 14px; border: 1px solid var(--edge); border-radius: 999px; background: transparent; color: var(--brass); font: 600 13px var(--mono); cursor: pointer; white-space: nowrap; }
+.acct:hover { border-color: var(--brass); }
+.acct[hidden] { display: none; }
+#sign-dialog, #wallet { width: min(440px, calc(100vw - 32px)); }
+#sign-dialog h2, #wallet h2 { margin: 0 0 6px; }
+#sign-dialog input#sign-name { width: 100%; min-height: 48px; margin: 6px 0 12px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 10px; background: var(--paper); color: var(--fg); font: inherit; }
+.sign-btns { display: grid; gap: 8px; }
+.sign-btns .btn { width: 100%; }
+.owner { margin: 14px 0 4px; }
+.owner summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--muted); font-size: 14px; }
+.owner form { display: grid; gap: 8px; }
+.owner input { min-height: 44px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 10px; background: var(--paper); color: var(--fg); font: inherit; }
+.wallet-left { margin: 0 0 8px; font: 600 22px var(--mono); color: var(--brass); }
+#wallet h3 { margin: 16px 0 6px; font-size: 14px; }
+.prices { list-style: none; margin: 0; padding: 0; }
+.prices li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.prices li:first-child { border-top: 0; }
+.packs { display: grid; gap: 8px; }
+.packs .btn { width: 100%; }
+#wallet .go { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }

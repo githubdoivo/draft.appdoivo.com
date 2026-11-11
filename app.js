@@ -38,6 +38,7 @@ function fill() {
   $("model").value = m; modelCost();
   if (cvText && cvFile) cvLoaded();
   if (credit) showCredit(credit);
+  paintAcct();
   paintTheme();
   if (typeof at !== "undefined") { $("step-count").textContent = w.stepOf.replace("{n}", at); readCv(); readJob(); readCompany(); if (at === 4) { summary(); if (review) paintReview(); } refresh(); }
   if (result) show(result);
@@ -228,15 +229,68 @@ function modelCost() { $("model-cost").textContent = w.about.replace("{c}", MODE
 let credit = "";
 function showCredit(b) { credit = b; $("credit").hidden = false; $("credit").textContent = w.credit.replace("{b}", b); }
 
-// ---- tailoring ----
-function askPass() {
+// ---- account (APP-DR-003): Face ID / Touch ID, credits and the wallet; the owner's passcode still works ----
+let acct = { signedIn: false, credits: 0, prices: { "/tailor": 3, "/interview": 2, "/review": 0 }, packs: [], start: 5 };
+const toBuf = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
+const toB64u = (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const acctCall = async (path, body) => { const r = await fetch(`${API}${path}`, { method: body ? "POST" : "GET", credentials: "include", headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined }); const d = await r.json().catch(() => ({})); if (!r.ok) throw d; return d; };
+function paintAcct() {
+  const b = $("acct"); if (!b) return;
+  if (store.get("pass")) { b.hidden = true; return; }   // the owner's device shows the dollar credit instead
+  b.hidden = false;
+  b.textContent = acct.signedIn ? (acct.credits === 1 ? w.acctCredit1 : w.acctCredits.replace("{n}", acct.credits)) : w.acctIn;
+}
+async function loadAcct() { try { acct = { ...acct, ...(await acctCall("/me")) }; } catch (_) {} paintAcct(); }
+let signWait = null;
+function askSignIn() {
   return new Promise((resolve) => {
-    const d = $("pass-dialog");
-    d.addEventListener("close", () => resolve(d.returnValue === "ok" ? $("pass").value : null), { once: true });
-    d.returnValue = ""; $("pass").value = "";
-    d.showModal();
+    signWait = resolve;
+    $("sign-lead").textContent = w.signLead.replace("{n}", acct.start || 5); $("sign-err").hidden = true; $("pass").value = ""; $("pass-err").hidden = true;
+    const ok = !!(window.PublicKeyCredential && navigator.credentials);
+    $("sign-create").disabled = $("sign-have").disabled = !ok; if (!ok) { $("sign-err").hidden = false; $("sign-err").textContent = w.signNo; }
+    $("sign-dialog").showModal();
   });
 }
+const signDone = (v) => { const r = signWait; signWait = null; if ($("sign-dialog").open) $("sign-dialog").close(); paintAcct(); if (r) r(v); };
+$("sign-dialog").addEventListener("close", () => { if (signWait) signDone(null); });
+$("sign-close").addEventListener("click", () => signDone(null));
+let signing = false;
+async function passkey(create) {
+  if (signing) return; signing = true; $("sign-err").hidden = true; $("sign-create").disabled = $("sign-have").disabled = true;
+  try {
+    const name = $("sign-name").value.trim();
+    const o = await acctCall("/account/options", { mode: create ? "create" : "signin", name });
+    let data;
+    if (create) {
+      const c = await navigator.credentials.create({ publicKey: { ...o, challenge: toBuf(o.challenge), user: { ...o.user, id: toBuf(o.user.id) } } });
+      data = await acctCall("/account/create", { name, userId: o.user.id, clientDataJSON: toB64u(c.response.clientDataJSON), attestationObject: toB64u(c.response.attestationObject) });
+    } else {
+      const c = await navigator.credentials.get({ publicKey: { ...o, challenge: toBuf(o.challenge) } });
+      data = await acctCall("/account/signin", { id: c.id, clientDataJSON: toB64u(c.response.clientDataJSON), authenticatorData: toB64u(c.response.authenticatorData), signature: toB64u(c.response.signature) });
+    }
+    acct = { ...acct, ...data }; signDone("account");
+  } catch (e) { if (!(e && e.name === "NotAllowedError")) { $("sign-err").hidden = false; $("sign-err").textContent = w.signFail; } }
+  finally { signing = false; $("sign-create").disabled = $("sign-have").disabled = false; }
+}
+$("sign-create").addEventListener("click", () => passkey(true));
+$("sign-have").addEventListener("click", () => passkey(false));
+$("pass-form").addEventListener("submit", (e) => { e.preventDefault(); const v = $("pass").value; if (v) { store.set("pass", v); signDone("pass"); } });
+function openWallet(need) {
+  $("wallet-title").textContent = need ? w.walletEmpty : w.walletTitle;
+  $("wallet-left").textContent = w.walletLeft.replace("{n}", acct.credits);
+  $("wallet-need").hidden = !need; if (need) $("wallet-need").textContent = w.walletNeed.replace("{p}", need).replace("{n}", acct.credits);
+  const pr = acct.prices || {};
+  $("prices").innerHTML = [["priceTailor", pr["/tailor"]], ["priceInterview", pr["/interview"]], ["priceReview", pr["/review"]]].map(([k, n]) => `<li><span>${esc(w[k])}</span><b>${n ? esc(w.nCredits.replace("{n}", n)) : esc(w.free)}</b></li>`).join("");
+  $("packs").innerHTML = (acct.packs || []).map((p) => `<button type="button" class="btn ghost pack" disabled>${esc(w.packBuy.replace("{n}", p.credits).replace("{e}", p.eur))}</button>`).join("");
+  $("sign-out").hidden = !acct.signedIn;
+  $("wallet").showModal();
+}
+$("wallet-close").addEventListener("click", () => $("wallet").close());
+$("sign-out").addEventListener("click", async () => { try { await acctCall("/account/signout", {}); } catch (_) {} acct = { ...acct, signedIn: false, credits: 0 }; $("wallet").close(); paintAcct(); });
+$("acct").addEventListener("click", () => acct.signedIn ? openWallet(0) : askSignIn());
+loadAcct();
+
+// ---- tailoring ----
 // Every call to the AI service: the passcode once per device, and plain-language errors
 async function api(path, body) {
   // reading a link is free: no passcode for it
@@ -246,16 +300,18 @@ async function api(path, body) {
     if (!res.ok) throw { say: res.status === 429 ? w.slowDown : w.linkFail };
     return data;
   }
-  const pass = store.get("pass") || await askPass();
-  if (!pass) return null;
-  const res = await fetch(`${API}${path}`, { method: "POST", headers: { "content-type": "application/json", "x-passcode": pass }, body: JSON.stringify(body) });
+  // the owner's passcode, or the signed-in account (cookie); signed out: sign in first, then carry on
+  let pass = store.get("pass");
+  if (!pass && !acct.signedIn) { const how = await askSignIn(); if (!how) return null; pass = store.get("pass"); }
+  const res = await fetch(`${API}${path}`, { method: "POST", credentials: "include", headers: { "content-type": "application/json", ...(pass ? { "x-passcode": pass } : {}) }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401) { store.set("pass", ""); $("pass-err").hidden = false; throw { say: w.passWrong }; }
+  if (res.status === 401 && data.error === "signin") { acct.signedIn = false; paintAcct(); const how = await askSignIn(); if (!how) return null; return api(path, body); }
+  if (res.status === 401) { store.set("pass", ""); paintAcct(); throw { say: w.passWrong }; }
   if (data.balance) showCredit(data.balance);
+  if (typeof data.credits === "number") { acct.credits = data.credits; paintAcct(); }
   if (res.status === 429 && data.error === "locked") throw { say: w.locked };
-  if (res.status === 402) throw { say: w.capped };
+  if (res.status === 402) { if (typeof data.credits === "number") { openWallet(data.price || 1); throw { say: w.walletNeed.replace("{p}", data.price || 1).replace("{n}", data.credits) }; } throw { say: w.capped }; }
   if (!res.ok) throw { say: w.failed };
-  store.set("pass", pass); $("pass-err").hidden = true;
   return data;
 }
 const sayError = (err) => (err instanceof TypeError ? w.offline : err?.say || w.failed);   // TypeError: the AI service cannot be reached
