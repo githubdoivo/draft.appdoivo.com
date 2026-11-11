@@ -203,23 +203,62 @@ test("the review board: a quick check first, then the CV is written with the per
   await expect(page.locator("#review")).toContainText("72% Match");
   await expect(page.locator("#credit")).toHaveText("Credit: $4.99");
   // one question at a time: Kubernetes at a past job (one tap on the job), then Java: no
+  const tap = async (name, exact = false) => { await page.waitForTimeout(450); await page.locator("#review").getByRole("button", { name, exact }).click(); };   // a person's pace: taps closer than that count as one
   await expect(page.locator(".ask-n")).toHaveText("1 of 2");
-  await page.getByRole("button", { name: "Yes, at a Past Job" }).click();
-  await page.getByRole("button", { name: "QA Engineer, Deloitte" }).click();
+  await expect(page.locator(".ask-btns button")).toHaveText(["Yes, at a Past Job", "Yes, as a Skill (Not Tied to a Job)", "Yes, Elsewhere (a Course, a Side Project)", "No"]);
+  await tap("Yes, at a Past Job");
+  await expect(page.locator(".ask-jobs button")).toHaveText(["QA Engineer, Deloitte", "Tester, Euronext"]);   // the jobs from the CV, and nothing else to pick here
+  await tap("QA Engineer, Deloitte");
   await expect(page.locator(".ask-q")).toHaveText("Have you used Java?");
-  await page.getByRole("button", { name: "No", exact: true }).click();
-  await expect(page.locator(".answers")).toContainText("At QA Engineer, Deloitte");
-  await page.locator('[data-sug="1"]').uncheck();
+  await tap("No", true);
+  // then the suggested changes, one at a time too
+  await expect(page.locator("#review h3").last()).toHaveText("Suggested Changes"); await expect(page.locator(".ask-n")).toHaveText("Change 1 of 2");
+  await expect(page.locator(".ask-q")).toHaveText("Lead the summary with Playwright"); await expect(page.locator('#review input[type="checkbox"]')).toHaveCount(0);   // no switches any more
+  await page.waitForTimeout(450); await page.getByRole("button", { name: "Use It" }).dblclick();                         // a double tap answers this one only
+  await expect(page.locator(".ask-n")).toHaveText("Change 2 of 2"); await expect(page.locator(".ask-q")).toHaveText("Move TypeScript into the headline");
+  await tap("Back"); await expect(page.locator(".ask-foot .hint")).toHaveText("Use"); await tap("Use It");
+  await tap("Skip It");
+  await expect(page.locator("#review h3").last()).toHaveText("Your Answers");
+  await expect(page.locator(".answers").first()).toContainText("At QA Engineer, Deloitte");
+  await expect(page.locator(".sug-answers li")).toHaveText([/Lead the summary with Playwright\s*Use/, /Move TypeScript into the headline\s*Skip/]);
   await page.locator("#tailor").click();
   await expect(page.locator("#result-note")).toContainText("Credit left: $4.76");
   expect(body.choices).toEqual({ confirmed: [{ term: "Kubernetes", note: "At QA Engineer, Deloitte" }], apply: ["Lead the summary with Playwright"], skip: ["Move TypeScript into the headline"] });
   await page.reload();                                                         // the choices survive a reload, with no second check
-  await expect(page.locator(".answers")).toContainText("At QA Engineer, Deloitte");
-  await page.locator('[data-goto="0"]').click();                               // Change goes back to that question
-  await page.getByRole("button", { name: "Yes, Elsewhere" }).click();
+  await expect(page.locator(".answers").first()).toContainText("At QA Engineer, Deloitte");
+  await page.locator('[data-goto="0"]').click();                               // Change goes to that question, and its answer comes straight back to the list
+  await tap("Yes, Elsewhere (a Course, a Side Project)");
   await page.locator('[data-note="0"]').fill("A Kubernetes course");
   await page.keyboard.press("Enter");
+  await expect(page.locator(".answers").first()).toContainText("A Kubernetes course"); await expect(page.locator(".answers").first()).toContainText("Java");
+  // Java after all, as a skill only; and a suggestion changed from Skip to Use
+  await page.waitForTimeout(450); await page.locator('[data-goto="1"]').click(); await tap("Yes, as a Skill (Not Tied to a Job)");
+  await page.waitForTimeout(450); await page.locator('[data-goto="3"]').click(); await expect(page.locator(".ask-foot .hint")).toHaveText("Skip"); await tap("Use It");
+  await expect(page.locator(".sug-answers li").nth(1)).toContainText("Use");
+  body = null; { const done = page.waitForResponse((r) => r.url().endsWith("/tailor")); await page.locator("#tailor").click(); await (await done).finished(); } await expect.poll(() => body && body.choices).toEqual({ confirmed: [{ term: "Kubernetes", note: "A Kubernetes course" }, { term: "Java", note: "As a skill, not tied to a job" }], apply: ["Lead the summary with Playwright", "Move TypeScript into the headline"], skip: [] });
+});
+
+test("the review questions when the CV's jobs weren't recognised: Yes, at a Past Job asks which one in words; nothing to ask shows no questions", async ({ page }) => {
+  let review = { ...REVIEW, jobs: [], suggestions: [] }, body = null;
+  await page.route(API, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/me") return route.fulfill({ status: 200, json: ME_OWNER });
+    if (path === "/review") return route.fulfill({ status: 200, json: review });
+    body = route.request().postDataJSON(); route.fulfill({ status: 200, json: await answer(page) });
+  });
+  await page.goto("/?lang=en"); await page.locator("#paste-toggle").click(); await page.locator("#cv-text").fill(CV); await page.locator("#next").click();
+  await page.locator("#job").fill("We need a QA automation engineer with Playwright and TypeScript. ".repeat(4)); await page.locator("#next").click(); await page.locator("#skip").click();
+  await expect(page.locator(".ask-n")).toHaveText("1 of 2");
+  await page.waitForTimeout(450); await page.getByRole("button", { name: "Yes, at a Past Job" }).click();
+  await expect(page.locator(".ask-jobs")).toHaveCount(0); await page.locator("[data-jobnote]").fill("Deloitte"); await page.keyboard.press("Enter");
   await expect(page.locator(".ask-q")).toHaveText("Have you used Java?");
+  await page.waitForTimeout(450); await page.getByRole("button", { name: "Yes, at a Past Job" }).click(); await page.waitForTimeout(450); await page.getByRole("button", { name: "Next" }).click();   // left empty: still a yes, at a past job
+  await expect(page.locator("#review h3").last()).toHaveText("Your Answers"); await expect(page.locator(".sug-answers")).toHaveCount(0);
+  await expect(page.locator(".answers li")).toHaveText([/Kubernetes\s*At Deloitte/, /Java\s*At a past job/]);
+  { const done = page.waitForResponse((r) => r.url().endsWith("/tailor")); await page.locator("#tailor").click(); await (await done).finished(); } await expect.poll(() => body && body.choices).toEqual({ confirmed: [{ term: "Kubernetes", note: "At Deloitte" }, { term: "Java", note: "At a past job" }], apply: [], skip: [] });
+  // an ad with nothing missing and nothing to change: no questionnaire at all
+  review = { ...REVIEW, missing: [], suggestions: [] }; await page.locator("#recheck").click();
+  await expect(page.locator("#review")).toContainText("72% Match"); await expect(page.locator(".ask-card")).toHaveCount(0);
 });
 
 test("a job link is read for you; a page that cannot be read says so", async ({ page }) => {

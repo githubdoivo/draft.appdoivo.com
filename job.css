@@ -366,3 +366,8 @@ select { -webkit-appearance: none; appearance: none; height: 48px; min-height: 4
 /* the header never pushes sideways: on a narrow phone the buttons drop under the name (found by the whole-app sweep with the owner's account) */
 .top { flex-wrap: wrap; row-gap: 8px; }
 .top .tools { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+/* the review as one questionnaire (APP-DR-004 round 2): the answers list also holds the suggested changes */
+.ask-card.done .ask-n { margin-top: 6px; }
+.sug-answers li span { line-height: 1.35; }
+.answers li b { flex: none; }
+.answers li .link { flex: none; min-width: 44px; }

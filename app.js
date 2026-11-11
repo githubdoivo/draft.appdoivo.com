@@ -407,48 +407,67 @@ async function runCheck() {
 // the missing skills, one question at a time (APP-DR-004): Yes at a past job (one tap on the job), Yes elsewhere (optional note), or No
 const jobName = (j) => [j.title, j.company].filter(Boolean).join(", ");
 function askCard(r) {
-  r.no = r.no || []; r.at = Math.min(r.at ?? 0, r.missing.length);
-  const answered = (i) => i in r.yes || r.no.includes(i);
-  if (r.at >= r.missing.length) return `<div class="ask-card done"><p><b>${esc(w.allDone)}</b></p><ol class="answers">${r.missing.map((m, i) => `<li><span>${esc(m.term)}</span><b>${esc(i in r.yes ? (r.yes[i] || w.yes) : w.no)}</b><button type="button" class="link quiet" data-goto="${i}">${esc(w.change)}</button></li>`).join("")}</ol></div>`;
-  const i = r.at, m = r.missing[i], mode = r.mode && r.mode.i === i ? r.mode.kind : "";
+  // one question at a time (APP-DR-004 round 2): first what the ad wants that the CV doesn't show, then each suggested change; the answers at the end, each with Change
+  r.no = r.no || []; r.seen = r.seen || [];
+  const M = r.missing.length, S = r.suggestions.length, N = M + S; r.at = Math.min(r.at ?? 0, N);
+  const said = (i) => (i in r.yes ? (r.yes[i] || w.yes) : w.no);
+  if (r.at >= N) return `<div class="ask-card done"><p><b>${esc(w.allDone)}</b></p>
+    ${M ? `<p class="ask-n">${esc(w.missingQ)}</p><ol class="answers">${r.missing.map((m, i) => `<li><span>${esc(m.term)}</span><b>${esc(said(i))}</b><button type="button" class="link quiet" data-goto="${i}" aria-label="${esc(w.change)}: ${esc(m.term)}">${esc(w.change)}</button></li>`).join("")}</ol>` : ""}
+    ${S ? `<p class="ask-n">${esc(w.suggest)}</p><ol class="answers sug-answers">${r.suggestions.map((t, k) => `<li><span>${esc(t)}</span><b>${esc(r.off.includes(k) ? w.sugOff : w.sugOn)}</b><button type="button" class="link quiet" data-goto="${M + k}" aria-label="${esc(w.change)}: ${esc(t)}">${esc(w.change)}</button></li>`).join("")}</ol>` : ""}</div>`;
+  const i = r.at, back = i > 0 ? `<button type="button" class="link quiet" data-ans="prev">${esc(w.prev)}</button>` : "";
+  if (i >= M) { const k = i - M, seen = r.seen.includes(k);
+    return `<div class="ask-card" aria-live="polite"><p class="ask-n">${esc(w.sugOf.replace("{i}", k + 1).replace("{n}", S))}</p>
+      <p class="ask-q">${esc(r.suggestions[k])}</p>
+      <div class="ask-btns"><button type="button" class="btn ghost" data-ans="use">${esc(w.sugUse)}</button><button type="button" class="btn ghost" data-ans="skip">${esc(w.sugSkip)}</button></div>
+      <p class="ask-foot">${back}${seen ? `<span class="hint">${esc(r.off.includes(k) ? w.sugOff : w.sugOn)}</span>` : ""}</p></div>`; }
+  const m = r.missing[i], mode = r.mode && r.mode.i === i ? r.mode.kind : "", answered = i in r.yes || r.no.includes(i);
   const jobs = Array.isArray(r.jobs) ? r.jobs.filter((j) => j && (j.title || j.company)) : [];
-  return `<div class="ask-card" aria-live="polite"><p class="ask-n">${esc(w.askOf.replace("{i}", i + 1).replace("{n}", r.missing.length))}</p>
+  return `<div class="ask-card" aria-live="polite"><p class="ask-n">${esc(w.askOf.replace("{i}", i + 1).replace("{n}", M))}</p>
     <p class="ask-q">${esc(m.question || m.term)}</p>
-    ${mode === "job" ? `<p class="hint">${esc(w.whichJob)}</p><div class="ask-jobs">${jobs.map((j, k) => `<button type="button" class="btn ghost" data-job="${k}">${esc(jobName(j))}</button>`).join("")}<button type="button" class="btn ghost" data-ans="else">${esc(w.yesElse)}</button></div>`
+    ${mode === "job" && jobs.length ? `<p class="hint">${esc(w.whichJob)}</p><div class="ask-jobs">${jobs.map((j, k) => `<button type="button" class="btn ghost" data-job="${k}">${esc(jobName(j))}</button>`).join("")}</div>`
+    : mode === "job" ? `<input class="note" data-jobnote="${i}" maxlength="120" placeholder="${esc(w.whichJobType)}" aria-label="${esc(m.term)}: ${esc(w.whichJobType)}"><button type="button" class="btn" data-ans="jobnext">${esc(w.next)}</button>`
     : mode === "else" ? `<input class="note" data-note="${i}" maxlength="160" placeholder="${esc(w.elseWhere)}" aria-label="${esc(m.term)}: ${esc(w.elseWhere)}" value="${esc(r.yes[i] || "")}"><button type="button" class="btn" data-ans="next">${esc(w.next)}</button>`
-    : `<div class="ask-btns">${jobs.length ? `<button type="button" class="btn ghost" data-ans="job">${esc(w.yesJob)}</button>` : ""}<button type="button" class="btn ghost" data-ans="else">${esc(w.yesElse)}</button><button type="button" class="btn ghost" data-ans="no">${esc(w.no)}</button></div>`}
-    <p class="ask-foot">${i > 0 ? `<button type="button" class="link quiet" data-ans="prev">${esc(w.prev)}</button>` : ""}${answered(i) ? `<span class="hint">${esc(i in r.yes ? (r.yes[i] || w.yes) : w.no)}</span>` : ""}</p></div>`;
+    : `<div class="ask-btns"><button type="button" class="btn ghost" data-ans="job">${esc(w.yesJob)}</button><button type="button" class="btn ghost" data-ans="skill">${esc(w.yesSkill)}</button><button type="button" class="btn ghost" data-ans="else">${esc(w.yesElse)}</button><button type="button" class="btn ghost" data-ans="no">${esc(w.no)}</button></div>`}
+    <p class="ask-foot">${mode ? `<button type="button" class="link quiet" data-ans="options">${esc(w.prev)}</button>` : back}${answered ? `<span class="hint">${esc(said(i))}</span>` : ""}</p></div>`;
 }
 function answer(kind, val) {
-  const r = review, i = r.at; r.no = r.no || [];
-  const advance = () => { r.mode = null; r.at = i + 1; };
+  const r = review, i = r.at, M = r.missing.length, N = M + r.suggestions.length; r.no = r.no || []; r.seen = r.seen || [];
+  // after Change, an answer goes straight back to the list of answers
+  const advance = () => { r.mode = null; r.at = r.back ? N : i + 1; r.back = false; };
+  const yes = (text) => { r.no = r.no.filter((x) => x !== i); r.yes[i] = text; };
   if (kind === "job") { r.mode = { i, kind: "job" }; }
-  else if (kind === "else") { r.mode = { i, kind: "else" }; r.no = r.no.filter((x) => x !== i); r.yes[i] = r.yes[i] || ""; }
-  else if (kind === "pick") { r.no = r.no.filter((x) => x !== i); r.yes[i] = w.atJob.replace("{job}", jobName(r.jobs[val])); advance(); }
+  else if (kind === "else") { r.mode = { i, kind: "else" }; yes(r.yes[i] && r.yes[i] !== w.asSkill && !/^(At |Em )/.test(r.yes[i]) ? r.yes[i] : ""); }
+  else if (kind === "options") { r.mode = null; }
+  else if (kind === "pick") { yes(w.atJob.replace("{job}", jobName(r.jobs.filter((j) => j && (j.title || j.company))[val]))); advance(); }
+  else if (kind === "jobnext") { const typed = (($("review").querySelector("[data-jobnote]") || {}).value || "").trim(); yes(typed ? w.atJob.replace("{job}", typed) : w.atPastJob); advance(); }
+  else if (kind === "skill") { yes(w.asSkill); advance(); }
   else if (kind === "no") { delete r.yes[i]; if (!r.no.includes(i)) r.no.push(i); advance(); }
+  else if (kind === "use" || kind === "skip") { const k = i - M; r.off = r.off.filter((x) => x !== k); if (kind === "skip") r.off.push(k); if (!r.seen.includes(k)) r.seen.push(k); advance(); }
   else if (kind === "next") advance();
-  else if (kind === "prev") { r.mode = null; r.at = Math.max(0, i - 1); }
-  else if (kind === "goto") { r.mode = null; r.at = val; }
+  else if (kind === "prev") { r.mode = null; r.back = false; r.at = Math.max(0, i - 1); }
+  else if (kind === "goto") { r.mode = null; r.back = true; r.at = val; }
   saveDraft(); paintReview();
   const f = $("review").querySelector(".ask-card .note, .ask-card .btn, .ask-card button"); if (f) f.focus();
 }
+const stage = (r) => { const at = Math.min(r.at ?? 0, r.missing.length + r.suggestions.length); return at >= r.missing.length + r.suggestions.length ? "done" : at >= r.missing.length ? "sug" : "miss"; };
 function paintReview() {
   const r = review;
   $("summary").hidden = true;
   $("review").innerHTML = `
     <div class="score" style="--s:${r.score}"><p><b>${esc(w.match.replace("{n}", r.score))}</b>${r.role ? ` · ${esc(r.role)}` : ""}</p><span class="meter" aria-hidden="true"><i></i></span><p class="muted">${esc(r.verdict)}</p></div>
     ${r.have.length ? `<h3>${esc(w.have)}</h3><p class="chips">${r.have.map((h) => `<span class="chip" title="${esc(h.evidence)}">${esc(h.term)}</span>`).join("")}</p>` : ""}
-    ${r.missing.length ? `<h3>${esc(w.missingQ)}</h3><p class="hint">${esc(w.missingHint)}</p>${askCard(r)}` : ""}
-    ${r.suggestions.length ? `<h3>${esc(w.suggest)}</h3><ul class="sugg">${r.suggestions.map((t, i) => `
-      <li><label class="sug"><span>${esc(t)}</span><input type="checkbox" role="switch" data-sug="${i}" ${r.off.includes(i) ? "" : "checked"}><span class="yes">${esc(r.off.includes(i) ? w.sugOff : w.sugOn)}</span></label></li>`).join("")}</ul>` : ""}
+    ${r.missing.length + r.suggestions.length ? `<h3>${esc(stage(r) === "sug" ? w.suggest : stage(r) === "done" ? w.ansTitle : w.missingQ)}</h3>${stage(r) === "done" ? "" : `<p class="hint">${esc(stage(r) === "sug" ? w.sugHint : w.missingHint)}</p>`}${askCard(r)}` : ""}
     <button type="button" class="link quiet" id="recheck">${esc(w.recheck)}</button>`;
 }
+let lastAnswer = 0;
 $("review").addEventListener("click", (e) => {
   if (e.target.id === "check" || e.target.id === "recheck") { review = null; runCheck(); return; }
   const b = e.target.closest("button"); if (!b || !review) return;
+  // a double tap answers one question, not this one and the next (the next question's button appears under the same finger)
+  if (Date.now() - lastAnswer < 400) return; if (b.dataset.ans || b.dataset.job !== undefined || b.dataset.goto !== undefined) lastAnswer = Date.now();
   if (b.dataset.ans) answer(b.dataset.ans); else if (b.dataset.job !== undefined) answer("pick", +b.dataset.job); else if (b.dataset.goto !== undefined) answer("goto", +b.dataset.goto);
 });
-$("review").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.dataset.note !== undefined) { e.preventDefault(); answer("next"); } });
+$("review").addEventListener("keydown", (e) => { if (e.key !== "Enter") return; if (e.target.dataset.note !== undefined) { e.preventDefault(); answer("next"); } else if (e.target.dataset.jobnote !== undefined) { e.preventDefault(); answer("jobnext"); } });
 $("review").addEventListener("change", (e) => {
   const t = e.target;
   if (t.dataset.sug !== undefined) { const i = +t.dataset.sug; review.off = t.checked ? review.off.filter((x) => x !== i) : [...review.off, i]; const y = t.parentElement.querySelector(".yes"); if (y) y.textContent = t.checked ? w.sugOn : w.sugOff; }

@@ -43,7 +43,7 @@ export const WORDS = {
     checkBtn: "Check the Match", checkCost: "A quick check first, about $0.002, so the full CV is written the way you want.", checking: "Checking the match…",
     match: "{n}% Match", have: "Already in Your CV", missingQ: "Not in Your CV", missingHint: "Say yes only if it is true. Only then can it be used.", yes: "Yes", where: "Where or how (optional)",
     suggest: "Suggested Changes", suggestHint: "Untick any you do not want.", recheck: "Check Again",
-    askOf: "{i} of {n}", yesJob: "Yes, at a Past Job", yesElse: "Yes, Elsewhere", no: "No", whichJob: "At which job?", elseWhere: "Where? (optional: a course, a side project…)", next: "Next", prev: "Back", answers: "Your Answers", change: "Change", allDone: "All answered. Only the yeses are used.", atJob: "At {job}", sugOn: "Use", sugOff: "Skip",
+    askOf: "{i} of {n}", yesSkill: "Yes, as a Skill (Not Tied to a Job)", asSkill: "As a skill, not tied to a job", whichJobType: "Which job? (title or company)", atPastJob: "At a past job", sugOf: "Change {i} of {n}", sugUse: "Use It", sugSkip: "Skip It", sugHint: "One at a time: use it or skip it.", ansTitle: "Your Answers", yesJob: "Yes, at a Past Job", yesElse: "Yes, Elsewhere (a Course, a Side Project)", no: "No", whichJob: "At which job?", elseWhere: "Where? (optional)", next: "Next", prev: "Back", answers: "Your Answers", change: "Change", allDone: "All answered. Only what you said yes to, and the changes you chose, are used.", atJob: "At {job}", sugOn: "Use", sugOff: "Skip",
     privacy: "The CV is sent only to the AI to write the new version, then kept nowhere.",
   },
   pt: {
@@ -88,7 +88,7 @@ export const WORDS = {
     checkBtn: "Verificar a Compatibilidade", checkCost: "Primeiro, uma verificação rápida, cerca de $0.002, para o CV final ser escrito como se quer.", checking: "A verificar a compatibilidade…",
     match: "{n}% Compatível", have: "Já no CV", missingQ: "Não Está no CV", missingHint: "Responder sim só se for verdade. Só assim pode ser usado.", yes: "Sim", where: "Onde ou como (opcional)",
     suggest: "Alterações Sugeridas", suggestHint: "Desmarcar as que não se querem.", recheck: "Verificar de Novo",
-    askOf: "{i} de {n}", yesJob: "Sim, num Emprego Anterior", yesElse: "Sim, Noutro Sítio", no: "Não", whichJob: "Em que emprego?", elseWhere: "Onde? (opcional: um curso, um projeto pessoal…)", next: "Seguinte", prev: "Voltar", answers: "As Respostas", change: "Mudar", allDone: "Tudo respondido. Só os sins são usados.", atJob: "Em {job}", sugOn: "Usar", sugOff: "Saltar",
+    askOf: "{i} de {n}", yesSkill: "Sim, como Competência (Sem Emprego Associado)", asSkill: "Como competência, sem emprego associado", whichJobType: "Em que emprego? (cargo ou empresa)", atPastJob: "Num emprego anterior", sugOf: "Alteração {i} de {n}", sugUse: "Usar", sugSkip: "Saltar", sugHint: "Uma de cada vez: usar ou saltar.", ansTitle: "As Respostas", yesJob: "Sim, num Emprego Anterior", yesElse: "Sim, Noutro Sítio (um Curso, um Projeto)", no: "Não", whichJob: "Em que emprego?", elseWhere: "Onde? (opcional)", next: "Seguinte", prev: "Voltar", answers: "As Respostas", change: "Mudar", allDone: "Tudo respondido. Só os sins e as alterações escolhidas são usados.", atJob: "Em {job}", sugOn: "Usar", sugOff: "Saltar",
     privacy: "O CV é enviado só à IA para escrever a nova versão e não fica guardado em lado nenhum.",
   },
 };
