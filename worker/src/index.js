@@ -48,6 +48,7 @@ const REVIEW_SCHEMA = obj({
   have: list({ term: str, evidence: str }),
   missing: list({ term: str, question: str }),
   suggestions: strs,
+  jobs: list({ title: str, company: str }),
 });
 
 const SYSTEM = `You tailor a candidate's CV to one job ad, and write a cover letter when a company description is given.
@@ -105,6 +106,7 @@ const REVIEW_SYSTEM = `You check how well a CV matches one job ad, before a tail
 - verdict: one sentence on the match and its main strength or gap.
 - have: up to 12 of the ad's most important terms the CV already shows, most important first; evidence: 2 to 6 words saying where (e.g. "Euronext, test automation").
 - missing: up to 8 things the ad asks for that the CV does not show, most important first; question: a short yes/no question asking the candidate whether they have it (e.g. "Have you worked with Kubernetes?").
+- jobs: the candidate's past and current roles from the CV, most recent first, up to 8; title and company exactly as the CV writes them (empty string if a company is not named). Used so the candidate can say in one tap where they used a missing skill.
 - suggestions: 3 to 6 concrete changes for the tailored CV, one short imperative sentence each (e.g. "Lead the summary with event-driven testing"). Only reorder, reword or bring forward what the CV already shows; never suggest adding something it does not.`;
 
 // ---- small helpers ----

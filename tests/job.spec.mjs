@@ -175,7 +175,7 @@ test("a reload keeps the CV, the job, the company and the step (this tab only)",
 
 const REVIEW = { role: "QA Automation Engineer", company: "Northwind", score: 72, verdict: "A strong match on automation; no Kubernetes shown.",
   have: [{ term: "Playwright", evidence: "Northwind, checkout tests" }], missing: [{ term: "Kubernetes", question: "Have you worked with Kubernetes?" }, { term: "Java", question: "Have you used Java?" }],
-  suggestions: ["Lead the summary with Playwright", "Move TypeScript into the headline"], cost: "$0.0021", balance: "$4.99" };
+  suggestions: ["Lead the summary with Playwright", "Move TypeScript into the headline"], jobs: [{ title: "QA Engineer", company: "Deloitte" }, { title: "Tester", company: "Euronext" }], cost: "$0.0021", balance: "$4.99" };
 
 test("the review board: a quick check first, then the CV is written with the person's choices", async ({ page }) => {
   let body = null;
@@ -195,14 +195,24 @@ test("the review board: a quick check first, then the CV is written with the per
   await page.locator("#skip").click();
   await expect(page.locator("#review")).toContainText("72% Match");
   await expect(page.locator("#credit")).toHaveText("Credit: $4.99");
-  await page.locator('[data-yes="0"]').check();
-  await page.locator('[data-note="0"]').fill("Deloitte, two client projects");
+  // one question at a time: Kubernetes at a past job (one tap on the job), then Java: no
+  await expect(page.locator(".ask-n")).toHaveText("1 of 2");
+  await page.getByRole("button", { name: "Yes, at a Past Job" }).click();
+  await page.getByRole("button", { name: "QA Engineer, Deloitte" }).click();
+  await expect(page.locator(".ask-q")).toHaveText("Have you used Java?");
+  await page.getByRole("button", { name: "No", exact: true }).click();
+  await expect(page.locator(".answers")).toContainText("At QA Engineer, Deloitte");
   await page.locator('[data-sug="1"]').uncheck();
   await page.locator("#tailor").click();
   await expect(page.locator("#result-note")).toContainText("Credit left: $4.76");
-  expect(body.choices).toEqual({ confirmed: [{ term: "Kubernetes", note: "Deloitte, two client projects" }], apply: ["Lead the summary with Playwright"], skip: ["Move TypeScript into the headline"] });
+  expect(body.choices).toEqual({ confirmed: [{ term: "Kubernetes", note: "At QA Engineer, Deloitte" }], apply: ["Lead the summary with Playwright"], skip: ["Move TypeScript into the headline"] });
   await page.reload();                                                         // the choices survive a reload, with no second check
-  await expect(page.locator('[data-yes="0"]')).toBeChecked();
+  await expect(page.locator(".answers")).toContainText("At QA Engineer, Deloitte");
+  await page.locator('[data-goto="0"]').click();                               // Change goes back to that question
+  await page.getByRole("button", { name: "Yes, Elsewhere" }).click();
+  await page.locator('[data-note="0"]').fill("A Kubernetes course");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".ask-q")).toHaveText("Have you used Java?");
 });
 
 test("a job link is read for you; a page that cannot be read says so", async ({ page }) => {

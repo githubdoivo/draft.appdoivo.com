@@ -35,6 +35,7 @@ export const WORDS = {
     checkBtn: "Check the Match", checkCost: "A quick check first, about $0.002, so the full CV is written the way you want.", checking: "Checking the match…",
     match: "{n}% Match", have: "Already in Your CV", missingQ: "Not in Your CV", missingHint: "Say yes only if it is true. Only then can it be used.", yes: "Yes", where: "Where or how (optional)",
     suggest: "Suggested Changes", suggestHint: "Untick any you do not want.", recheck: "Check Again",
+    askOf: "{i} of {n}", yesJob: "Yes, at a Past Job", yesElse: "Yes, Elsewhere", no: "No", whichJob: "At which job?", elseWhere: "Where? (optional: a course, a side project…)", next: "Next", prev: "Back", answers: "Your Answers", change: "Change", allDone: "All answered. Only the yeses are used.", atJob: "At {job}", sugOn: "Use", sugOff: "Skip",
     privacy: "The CV is sent only to the AI to write the new version, then kept nowhere.",
   },
   pt: {
@@ -71,6 +72,7 @@ export const WORDS = {
     checkBtn: "Verificar a Compatibilidade", checkCost: "Primeiro, uma verificação rápida, cerca de $0.002, para o CV final ser escrito como se quer.", checking: "A verificar a compatibilidade…",
     match: "{n}% Compatível", have: "Já no CV", missingQ: "Não Está no CV", missingHint: "Responder sim só se for verdade. Só assim pode ser usado.", yes: "Sim", where: "Onde ou como (opcional)",
     suggest: "Alterações Sugeridas", suggestHint: "Desmarcar as que não se querem.", recheck: "Verificar de Novo",
+    askOf: "{i} de {n}", yesJob: "Sim, num Emprego Anterior", yesElse: "Sim, Noutro Sítio", no: "Não", whichJob: "Em que emprego?", elseWhere: "Onde? (opcional: um curso, um projeto pessoal…)", next: "Seguinte", prev: "Voltar", answers: "As Tuas Respostas", change: "Mudar", allDone: "Tudo respondido. Só os sins são usados.", atJob: "Em {job}", sugOn: "Usar", sugOff: "Saltar",
     privacy: "O CV é enviado só à IA para escrever a nova versão e não fica guardado em lado nenhum.",
   },
 };

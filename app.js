@@ -275,11 +275,39 @@ async function runCheck() {
   try {
     const d = await api("/review", { ...inputs(), ui: lang });
     if (!d) return showReview();
-    review = { ...d, key: reviewKey(), yes: {}, off: [] };
+    review = { ...d, key: reviewKey(), yes: {}, off: [], no: [], at: 0 };
     saveDraft(); paintReview();
   } catch (err) {
     $("review").innerHTML = `<p class="hint bad">${esc(sayError(err))}</p><button type="button" class="btn ghost" id="check">${esc(w.checkBtn)}</button>`;
   }
+}
+// the missing skills, one question at a time (APP-DR-004): Yes at a past job (one tap on the job), Yes elsewhere (optional note), or No
+const jobName = (j) => [j.title, j.company].filter(Boolean).join(", ");
+function askCard(r) {
+  r.no = r.no || []; r.at = Math.min(r.at ?? 0, r.missing.length);
+  const answered = (i) => i in r.yes || r.no.includes(i);
+  if (r.at >= r.missing.length) return `<div class="ask-card done"><p><b>${esc(w.allDone)}</b></p><ol class="answers">${r.missing.map((m, i) => `<li><span>${esc(m.term)}</span><b>${esc(i in r.yes ? (r.yes[i] || w.yes) : w.no)}</b><button type="button" class="link quiet" data-goto="${i}">${esc(w.change)}</button></li>`).join("")}</ol></div>`;
+  const i = r.at, m = r.missing[i], mode = r.mode && r.mode.i === i ? r.mode.kind : "";
+  const jobs = Array.isArray(r.jobs) ? r.jobs.filter((j) => j && (j.title || j.company)) : [];
+  return `<div class="ask-card" aria-live="polite"><p class="ask-n">${esc(w.askOf.replace("{i}", i + 1).replace("{n}", r.missing.length))}</p>
+    <p class="ask-q">${esc(m.question || m.term)}</p>
+    ${mode === "job" ? `<p class="hint">${esc(w.whichJob)}</p><div class="ask-jobs">${jobs.map((j, k) => `<button type="button" class="btn ghost" data-job="${k}">${esc(jobName(j))}</button>`).join("")}<button type="button" class="btn ghost" data-ans="else">${esc(w.yesElse)}</button></div>`
+    : mode === "else" ? `<input class="note" data-note="${i}" maxlength="160" placeholder="${esc(w.elseWhere)}" aria-label="${esc(m.term)}: ${esc(w.elseWhere)}" value="${esc(r.yes[i] || "")}"><button type="button" class="btn" data-ans="next">${esc(w.next)}</button>`
+    : `<div class="ask-btns">${jobs.length ? `<button type="button" class="btn ghost" data-ans="job">${esc(w.yesJob)}</button>` : ""}<button type="button" class="btn ghost" data-ans="else">${esc(w.yesElse)}</button><button type="button" class="btn ghost" data-ans="no">${esc(w.no)}</button></div>`}
+    <p class="ask-foot">${i > 0 ? `<button type="button" class="link quiet" data-ans="prev">${esc(w.prev)}</button>` : ""}${answered(i) ? `<span class="hint">${esc(i in r.yes ? (r.yes[i] || w.yes) : w.no)}</span>` : ""}</p></div>`;
+}
+function answer(kind, val) {
+  const r = review, i = r.at; r.no = r.no || [];
+  const advance = () => { r.mode = null; r.at = i + 1; };
+  if (kind === "job") { r.mode = { i, kind: "job" }; }
+  else if (kind === "else") { r.mode = { i, kind: "else" }; r.no = r.no.filter((x) => x !== i); r.yes[i] = r.yes[i] || ""; }
+  else if (kind === "pick") { r.no = r.no.filter((x) => x !== i); r.yes[i] = w.atJob.replace("{job}", jobName(r.jobs[val])); advance(); }
+  else if (kind === "no") { delete r.yes[i]; if (!r.no.includes(i)) r.no.push(i); advance(); }
+  else if (kind === "next") advance();
+  else if (kind === "prev") { r.mode = null; r.at = Math.max(0, i - 1); }
+  else if (kind === "goto") { r.mode = null; r.at = val; }
+  saveDraft(); paintReview();
+  const f = $("review").querySelector(".ask-card .note, .ask-card .btn, .ask-card button"); if (f) f.focus();
 }
 function paintReview() {
   const r = review;
@@ -287,21 +315,20 @@ function paintReview() {
   $("review").innerHTML = `
     <div class="score" style="--s:${r.score}"><p><b>${esc(w.match.replace("{n}", r.score))}</b>${r.role ? ` · ${esc(r.role)}` : ""}</p><span class="meter" aria-hidden="true"><i></i></span><p class="muted">${esc(r.verdict)}</p></div>
     ${r.have.length ? `<h3>${esc(w.have)}</h3><p class="chips">${r.have.map((h) => `<span class="chip" title="${esc(h.evidence)}">${esc(h.term)}</span>`).join("")}</p>` : ""}
-    ${r.missing.length ? `<h3>${esc(w.missingQ)}</h3><p class="hint">${esc(w.missingHint)}</p><ul class="asks">${r.missing.map((m, i) => `
-      <li><label class="ask"><span>${esc(m.question || m.term)}</span><input type="checkbox" role="switch" data-yes="${i}" ${i in r.yes ? "checked" : ""}><span class="yes">${esc(w.yes)}</span></label>
-      <input class="note" data-note="${i}" maxlength="160" placeholder="${esc(w.where)}" aria-label="${esc(m.term)}: ${esc(w.where)}" value="${esc(r.yes[i] || "")}" ${i in r.yes ? "" : "hidden"}></li>`).join("")}</ul>` : ""}
-    ${r.suggestions.length ? `<h3>${esc(w.suggest)}</h3><p class="hint">${esc(w.suggestHint)}</p><ul class="sugg">${r.suggestions.map((t, i) => `
-      <li><label><input type="checkbox" data-sug="${i}" ${r.off.includes(i) ? "" : "checked"}><span>${esc(t)}</span></label></li>`).join("")}</ul>` : ""}
+    ${r.missing.length ? `<h3>${esc(w.missingQ)}</h3><p class="hint">${esc(w.missingHint)}</p>${askCard(r)}` : ""}
+    ${r.suggestions.length ? `<h3>${esc(w.suggest)}</h3><ul class="sugg">${r.suggestions.map((t, i) => `
+      <li><label class="sug"><span>${esc(t)}</span><input type="checkbox" role="switch" data-sug="${i}" ${r.off.includes(i) ? "" : "checked"}><span class="yes">${esc(r.off.includes(i) ? w.sugOff : w.sugOn)}</span></label></li>`).join("")}</ul>` : ""}
     <button type="button" class="link quiet" id="recheck">${esc(w.recheck)}</button>`;
 }
-$("review").addEventListener("click", (e) => { if (e.target.id === "check" || e.target.id === "recheck") { review = null; runCheck(); } });
+$("review").addEventListener("click", (e) => {
+  if (e.target.id === "check" || e.target.id === "recheck") { review = null; runCheck(); return; }
+  const b = e.target.closest("button"); if (!b || !review) return;
+  if (b.dataset.ans) answer(b.dataset.ans); else if (b.dataset.job !== undefined) answer("pick", +b.dataset.job); else if (b.dataset.goto !== undefined) answer("goto", +b.dataset.goto);
+});
+$("review").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.dataset.note !== undefined) { e.preventDefault(); answer("next"); } });
 $("review").addEventListener("change", (e) => {
   const t = e.target;
-  if (t.dataset.yes !== undefined) {
-    const i = +t.dataset.yes, note = $("review").querySelector(`[data-note="${i}"]`);
-    if (t.checked) { review.yes[i] = review.yes[i] || ""; note.hidden = false; } else { delete review.yes[i]; note.hidden = true; }
-  }
-  if (t.dataset.sug !== undefined) { const i = +t.dataset.sug; review.off = t.checked ? review.off.filter((x) => x !== i) : [...review.off, i]; }
+  if (t.dataset.sug !== undefined) { const i = +t.dataset.sug; review.off = t.checked ? review.off.filter((x) => x !== i) : [...review.off, i]; const y = t.parentElement.querySelector(".yes"); if (y) y.textContent = t.checked ? w.sugOn : w.sugOff; }
   saveDraft();
 });
 $("review").addEventListener("input", (e) => { if (e.target.dataset.note !== undefined) { review.yes[+e.target.dataset.note] = e.target.value; saveDraft(); } });
