@@ -318,3 +318,44 @@ test("accounts: signed out, Tailor asks to sign in with Face ID; signed in, the 
   await expect(page.locator("#wallet-need")).toHaveText("This needs 3 credits and you have 2.");
   await expect(page.locator("#packs")).toContainText("10 credits · €4");
 });
+
+// APP-DR-005: LinkedIn's Share can copy a sentence with the link inside; the link is picked out and read
+test.describe("share text with a link inside", () => {
+  const LINK = "https://www.linkedin.com/jobs/view/4486077010/", SHARE = `Check out this job at Five9: ${LINK}`;
+  const toJob = async (page, asked) => {
+    await page.route(API, (route) => { if (!route.request().url().endsWith("/job")) return route.fulfill({ status: 401, json: { error: "signin" } }); asked.push(route.request().postDataJSON().url); route.fulfill({ status: 200, json: { title: "Senior Quality Engineer", company: "Five9", text: "We need a QA automation engineer with Playwright and TypeScript. ".repeat(4) } }); });
+    await page.goto("/?lang=en"); await page.locator("#paste-toggle").click(); await page.locator("#cv-text").fill(CV); await page.locator("#next").click();
+  };
+  const paste = (page, sel, text) => page.locator(sel).evaluate((el, t) => { const d = new DataTransfer(); d.setData("text", t); el.focus(); const e = new ClipboardEvent("paste", { clipboardData: d, bubbles: true, cancelable: true }); if (el.dispatchEvent(e)) { el.value = t; el.dispatchEvent(new Event("input", { bubbles: true })); } }, text);
+  test("in the link box: Read picks the link out and reads it, also when tapped twice", async ({ page }) => {
+    const asked = []; await toJob(page, asked);
+    await page.locator("#job-link").evaluate((el, t) => { el.value = t; }, SHARE);
+    await page.locator("#read-link").dblclick();
+    await expect(page.locator("#job")).toHaveValue(/^Senior Quality Engineer · Five9/);
+    await expect(page.locator("#job-link")).toHaveValue(LINK);
+    await expect(page.locator("#job-status")).toContainText("Read from linkedin.com");
+    expect(new Set(asked)).toEqual(new Set([LINK]));
+  });
+  test("pasted into the link box or the empty ad box: the link is read by itself", async ({ page }) => {
+    const asked = []; await toJob(page, asked);
+    await paste(page, "#job-link", SHARE + ".");
+    await expect(page.locator("#job")).toHaveValue(/^Senior Quality Engineer · Five9/); await expect(page.locator("#job-link")).toHaveValue(LINK);
+    await page.locator("#job").fill(""); await page.locator("#job-link").fill("");
+    await paste(page, "#job", SHARE);
+    await expect(page.locator("#job-link")).toHaveValue(LINK); await expect(page.locator("#job")).toHaveValue(/^Senior Quality Engineer · Five9/);
+    expect(new Set(asked)).toEqual(new Set([LINK]));
+  });
+  test("not a share: an ad's own text with links in it stays as text, and words without a link say so", async ({ page }) => {
+    const asked = []; await toJob(page, asked);
+    const ad = "We need a QA automation engineer with Playwright and TypeScript. ".repeat(4) + "Apply at https://example.com/apply or see https://example.com/about";
+    await paste(page, "#job", ad);
+    await expect(page.locator("#job")).toHaveValue(ad); await expect(page.locator("#job-link")).toHaveValue("");
+    // text already in the ad box: a pasted share sentence is added as text, the ad is not thrown away
+    await paste(page, "#job", "Check out this job: https://example.com/job/1");
+    await expect(page.locator("#job-link")).toHaveValue("");
+    await page.locator("#job-link").evaluate((el) => { el.value = "check out this job"; });
+    await page.locator("#read-link").click();
+    await expect(page.locator("#job-status")).toHaveClass(/bad/); await expect(page.locator("#job-status")).toContainText("doesn't look like a link");
+    expect(asked).toEqual([]);
+  });
+});

@@ -284,22 +284,30 @@ function jobPosting(html) {
   }
   return null;
 }
-export async function readJob(raw) {
+export async function readJob(raw, wait = 700) {
   let url; try { url = new URL(raw); } catch (_) { return null; }
   if (!/^https?:$/.test(url.protocol) || url.port || url.username || /^(localhost|[\d.]+|\[.*\])$/i.test(url.hostname) || !url.hostname.includes(".")) return null;
-  // LinkedIn shows job pages only to signed-in people, but has a public page per job
-  const li = url.hostname.endsWith("linkedin.com") && (url.pathname.match(/\/jobs\/view\/(?:[^/]*-)?(\d{6,})/) || [null, url.searchParams.get("currentJobId")])[1];
   const get = (u) => fetch(u, { redirect: "follow", signal: AbortSignal.timeout(8000),
-    headers: { "user-agent": "Mozilla/5.0 (compatible; draft.appdoivo.com; reads one job ad on request)", accept: "text/html,application/xhtml+xml", "accept-language": "en-GB,en;q=0.9,pt;q=0.8" } });
-  let res = await get(li ? `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${li}` : url.href);
-  // LinkedIn often answers "busy" (429/999) to one public page: try its other public job page once
-  if (li && !res.ok) res = await get(`https://www.linkedin.com/jobs/view/${li}/`);
-  if (!res.ok || !/html/i.test(res.headers.get("content-type") || "")) return null;
-  const html = (await res.text()).slice(0, 2_000_000);
+    headers: { "user-agent": "Mozilla/5.0 (compatible; draft.appdoivo.com; reads one job ad on request)", accept: "text/html,application/xhtml+xml", "accept-language": "en-GB,en;q=0.9,pt;q=0.8" } }).catch(() => null);
+  const page = async (res) => (res && res.ok && /html/i.test(res.headers.get("content-type") || "") ? (await res.text()).slice(0, 2_000_000) : "");
+  // LinkedIn's Share can give a short link (lnkd.in) that only says where the job is: follow it to the job
+  let first = null;
+  if (/(^|\.)lnkd\.in$/i.test(url.hostname)) { first = await get(url.href); try { url = new URL(first.url); } catch (_) { return null; } }
+  // LinkedIn shows job pages only to signed-in people, but has a public page per job
+  const li = /(^|\.)linkedin\.com$/i.test(url.hostname) && (url.pathname.match(/\/jobs\/view\/(?:[^/]*-)?(\d{6,})/) || [null, (url.searchParams.get("currentJobId") || "").match(/^\d{6,}$/)?.[0]])[1];
+  let html = "";
   if (li) {
-    const desc = html.match(/class="[^"]*show-more-less-html__markup[^"]*"[^>]*>([\s\S]*?)<\/div>/i)?.[1];
-    if (desc) return { title: htmlText(html.match(/<h2[^>]*top-card-layout__title[^>]*>([\s\S]*?)<\/h2>/i)?.[1] || ""), company: htmlText(html.match(/topcard__org-name-link[^>]*>([\s\S]*?)<\/a>/i)?.[1] || ""), text: htmlText(desc) };
-  }
+    // LinkedIn often answers "busy" (429/999) to a first request: its two public job pages in turn, then the first once more after a short wait (APP-DR-005)
+    const guest = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${li}`, view = `https://www.linkedin.com/jobs/view/${li}/`;
+    for (const [i, u] of [guest, view, guest].entries()) {
+      if (i === 2) await new Promise((r) => setTimeout(r, wait));
+      const h = await page(await get(u)); if (!h) continue;
+      html = h;
+      const desc = h.match(/class="[^"]*show-more-less-html__markup[^"]*"[^>]*>([\s\S]*?)<\/div>/i)?.[1];
+      if (desc) return { title: htmlText(h.match(/<h2[^>]*top-card-layout__title[^>]*>([\s\S]*?)<\/h2>/i)?.[1] || ""), company: htmlText(h.match(/topcard__org-name-link[^>]*>([\s\S]*?)<\/a>/i)?.[1] || ""), text: htmlText(desc) };
+    }
+  } else html = await page(first || await get(url.href));
+  if (!html) return null;
   const p = jobPosting(html);
   if (p && p.text.length > 200) return p;
   if (url.pathname.length < 2) return null;                       // a site's front page is not an ad

@@ -60,6 +60,8 @@ const chips = (list) => list.map((k) => `<span class="chip">${esc(k)}</span>`).j
 let at = 1;
 const panel = (n) => document.querySelector(`.machine .panel[data-step="${n}"]`);
 const isLink = (t) => /^https?:\/\/\S+$/i.test(t.trim());
+// Share sheets often copy a sentence with the link inside ("Check out this job at X: https://…"): the one link is picked out
+const pickLink = (t) => { t = String(t || "").trim(); if (isLink(t)) return t; const m = t.match(/https?:\/\/[^\s<>"']+/gi); return m && m.length === 1 && t.length <= 500 ? m[0].replace(/[)\].,;:!?]+$/, "") : ""; };
 const valid = {
   1: () => cvText.length >= MIN.cv && words(cvText) >= 40,
   2: () => $("job").value.trim().length >= MIN.job && !isLink($("job").value),
@@ -160,9 +162,11 @@ $("job").addEventListener("input", () => {
   // a link pasted into the text box moves to the link box and is read from there
   if (isLink($("job").value)) { $("job-link").value = $("job").value.trim(); $("job").value = ""; readLink($("job-link").value); }
 });
-$("read-link").addEventListener("click", () => { const u = $("job-link").value.trim(); if (isLink(u)) readLink(u); else status("job-status", w.linkBad, true); });
+$("read-link").addEventListener("click", () => { const u = pickLink($("job-link").value); if (u) { $("job-link").value = u; readLink(u); } else status("job-status", w.linkBad, true); });
+// share text ("Check out this job… https://…") pasted into the empty ad box: its link goes to the link box and is read
+$("job").addEventListener("paste", (e) => { const t = (e.clipboardData && e.clipboardData.getData("text")) || "", u = pickLink(t); if (u && !isLink(t) && !$("job").value.trim()) { e.preventDefault(); $("job-link").value = u; readLink(u); } });
 $("job-link").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("read-link").click(); } });
-$("job-link").addEventListener("paste", () => setTimeout(() => { const u = $("job-link").value.trim(); if (isLink(u)) readLink(u); }, 0));
+$("job-link").addEventListener("paste", () => setTimeout(() => { const u = pickLink($("job-link").value); if (u) { $("job-link").value = u; readLink(u); } }, 0));
 // Lines that are only about who to contact: emails, phone numbers, "contact / send your CV to"
 function stripContacts(text) {
   const contacts = [], keep = [];
