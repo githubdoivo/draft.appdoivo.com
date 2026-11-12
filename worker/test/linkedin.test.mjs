@@ -35,9 +35,13 @@ test("a page that answers without the ad (a sign-in wall) counts as not read: th
   fake([() => html("<html><body>Sign in to LinkedIn</body></html>"), () => html(AD)]);
   assert.equal((await readJob(VIEW, 0))?.company, "Five9"); assert.equal(calls.length, 2);
 });
-test("negative: busy three times gives up after exactly three requests, with no ad", async () => {
-  fake([busy, busy, busy, () => html(AD)]);
-  assert.equal(await readJob(VIEW, 0), null); assert.equal(calls.length, 3);
+test("busy four times: the fifth try reads it (APP-DR-005 round 3)", async () => {
+  fake([busy, busy, busy, busy, () => html(AD)]);
+  assert.equal((await readJob(VIEW, 0))?.company, "Five9"); assert.deepEqual(calls, [GUEST, VIEW, GUEST, VIEW, GUEST]);
+});
+test("negative: busy five times gives up after exactly five requests, with no ad", async () => {
+  fake([busy, busy, busy, busy, busy, () => html(AD)]);
+  assert.equal(await readJob(VIEW, 0), null); assert.equal(calls.length, 5);
 });
 test("a short lnkd.in share link is followed to its job", async () => {
   fake([() => html("<html>redirected</html>", `https://www.linkedin.com/jobs/view/${ID}?trk=share`), () => html(AD)]);

@@ -194,7 +194,13 @@ function aboutCompany(text, name) {
 async function readLink(u) {
   status("job-status", w.linkReading);
   try {
-    const d = await api("/job", { url: u });
+    // LinkedIn often says "busy" to the first reads: try twice more on its own before giving up (APP-DR-005)
+    let d;
+    for (let n = 0; ; n++) {
+      try { d = await api("/job", { url: u }); break; }
+      catch (e) { if (n >= 2 || !/linkedin\.com|lnkd\.in/i.test(u) || $("job-link").value.trim() !== u) throw e;
+        status("job-status", w.linkRetry); await new Promise((r) => setTimeout(r, 2500 * (n + 1))); }
+    }
     if (!d || $("job-link").value.trim() !== u) return status("job-status", w.jobHint);   // cancelled, or the link changed meanwhile
     // contact details (emails, phone numbers, "contact X") are not part of the job: kept aside, not sent to the AI
     const { text: jobText, contacts } = stripContacts(d.text);

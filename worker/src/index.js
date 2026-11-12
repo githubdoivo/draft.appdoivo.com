@@ -359,8 +359,9 @@ export async function readJob(raw, wait = 700) {
   if (li) {
     // LinkedIn often answers "busy" (429/999) to a first request: its two public job pages in turn, then the first once more after a short wait (APP-DR-005)
     const guest = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${li}`, view = `https://www.linkedin.com/jobs/view/${li}/`;
-    for (const [i, u] of [guest, view, guest].entries()) {
-      if (i === 2) await new Promise((r) => setTimeout(r, wait));
+    // five tries, alternating the two pages, waiting a little longer each time (about 5 s at most)
+    for (const [i, u] of [guest, view, guest, view, guest].entries()) {
+      if (i >= 2) await new Promise((r) => setTimeout(r, wait * (i - 1)));
       const h = await page(await get(u)); if (!h) continue;
       html = h;
       const desc = h.match(/class="[^"]*show-more-less-html__markup[^"]*"[^>]*>([\s\S]*?)<\/div>/i)?.[1];
