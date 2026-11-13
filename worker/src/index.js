@@ -378,7 +378,7 @@ export async function readJob(raw, wait = 700) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const h = cors(req, env);
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: h });
     const url = new URL(req.url);
@@ -461,53 +461,66 @@ export default {
         "\n</candidate_choices>";
     }
 
-    const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-    const m = MODELS[model], schema = interview ? INTERVIEW_SCHEMA : review ? REVIEW_SCHEMA : SCHEMA;
-    // Sonnet and Opus: if a safety filter ever declines, the API retries on a suitable model by itself
-    const fallback = model === "haiku" ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" };
-    const ask = (strict) => client.beta.messages.create({
-      model: m.id, max_tokens: interview ? 6000 : review ? 3000 : 16000, system: interview ? INTERVIEW_SYSTEM : review ? REVIEW_SYSTEM : SYSTEM,
-      messages: [{ role: "user", content: strict ? user : `${user}\n\nReply with only one JSON object, no other text, following this JSON schema:\n${JSON.stringify(schema)}` }],
-      output_config: strict ? { effort: review ? "low" : "medium", format: { type: "json_schema", schema } } : { effort: review ? "low" : "medium" },
-      ...fallback,
-    });
-    let res;
-    try {
-      try { res = await ask(true); }
-      catch (e) {
-        // The schema itself refused (nothing was generated or charged): plain JSON instead
-        if (e?.status !== 400 || !/grammar|schema/i.test(e?.error?.error?.message || "")) throw e;
-        console.error("schema_refused", e?.error?.error?.message);
-        res = await ask(false);
+    // Writing a whole CV can take more than 100 seconds, and Cloudflare closes a connection that is silent that long:
+    // the tailoring then failed and had to be tried again (APP-DR-004). So the answer is a stream that sends a space
+    // every 15 seconds while Claude writes (spaces before JSON are still valid JSON). The real status rides in the body.
+    const work = async () => {
+      const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+      const m = MODELS[model], schema = interview ? INTERVIEW_SCHEMA : review ? REVIEW_SCHEMA : SCHEMA;
+      // Sonnet and Opus: if a safety filter ever declines, the API retries on a suitable model by itself
+      const fallback = model === "haiku" ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" };
+      const ask = (strict) => client.beta.messages.create({
+        model: m.id, max_tokens: interview ? 6000 : review ? 3000 : 16000, system: interview ? INTERVIEW_SYSTEM : review ? REVIEW_SYSTEM : SYSTEM,
+        messages: [{ role: "user", content: strict ? user : `${user}\n\nReply with only one JSON object, no other text, following this JSON schema:\n${JSON.stringify(schema)}` }],
+        output_config: strict ? { effort: review ? "low" : "medium", format: { type: "json_schema", schema } } : { effort: review ? "low" : "medium" },
+        ...fallback,
+      });
+      let res;
+      try {
+        try { res = await ask(true); }
+        catch (e) {
+          // The schema itself refused (nothing was generated or charged): plain JSON instead
+          if (e?.status !== 400 || !/grammar|schema/i.test(e?.error?.error?.message || "")) throw e;
+          console.error("schema_refused", e?.error?.error?.message);
+          res = await ask(false);
+        }
+      } catch (e) {
+        // What the API said (type and message only: never the key or the CV)
+        console.error("ai_error", e?.status, e?.error?.error?.type, e?.error?.error?.message || e?.message);
+        return json({ error: "ai", detail: e?.status || "" }, e instanceof Anthropic.RateLimitError ? 429 : 502, h);
       }
-    } catch (e) {
-      // What the API said (type and message only: never the key or the CV)
-      console.error("ai_error", e?.status, e?.error?.error?.type, e?.error?.error?.message || e?.message);
-      return json({ error: "ai", detail: e?.status || "" }, e instanceof Anthropic.RateLimitError ? 429 : 502, h);
-    }
-    await env.JOB.put(runsKey, String(runs + 1), { expirationTtl: 2 * 86400 });
+      await env.JOB.put(runsKey, String(runs + 1), { expirationTtl: 2 * 86400 });
 
-    // What it cost, taken from the credit even when the answer is unusable (the tokens were spent)
-    const cost = costOf(m, res.usage), after = uid ? 0 : await charge(env, who, cost);
-    let paid = uid ? { credits: have } : { cost: usd(cost), balance: usd(after) };
+      // What it cost, taken from the credit even when the answer is unusable (the tokens were spent)
+      const cost = costOf(m, res.usage), after = uid ? 0 : await charge(env, who, cost);
+      let paid = uid ? { credits: have } : { cost: usd(cost), balance: usd(after) };
 
-    if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") return json({ error: res.stop_reason, ...paid }, 502, h);
-    const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("");
-    let out;
-    try { out = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)); } catch (_) { return json({ error: "parse", ...paid }, 502, h); }
-    if (interview) {
-      if (!Array.isArray(out?.questions) || !out.questions.length) return json({ error: "parse", ...paid }, 502, h);
-    } else if (review) {
-      if (!Array.isArray(out?.have)) return json({ error: "parse", ...paid }, 502, h);
-      out.score = Math.max(0, Math.min(100, Math.round(Number(out.score) || 0)));
-    } else {
-      if (!out?.cv?.name && !out?.cv?.experience?.length) return json({ error: "parse", ...paid }, 502, h);
-      out.cv.lang = /^pt/i.test(out.cv.lang || "") ? "pt" : "en";
-      // The page reads the letter as the CV's sibling with its own lang, name and contact
-      out.letter = out.letter?.paragraphs?.length ? { ...out.letter, lang: out.cv.lang, name: out.cv.name, contact: out.cv.contact } : null;
-    }
-    await env.JOB.put(key, JSON.stringify(out), { expirationTtl: CACHE_DAYS * 86400 });
-    if (uid && price && !free) { const now = Math.max(0, (await credits(env, uid)) - price); await env.JOB.put(`credits:${uid}`, String(now)); paid = { credits: now, price }; }
-    return json({ ...out, cached: false, model, ...paid }, 200, h);
+      if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") return json({ error: res.stop_reason, ...paid }, 502, h);
+      const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+      let out;
+      try { out = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)); } catch (_) { return json({ error: "parse", ...paid }, 502, h); }
+      if (interview) {
+        if (!Array.isArray(out?.questions) || !out.questions.length) return json({ error: "parse", ...paid }, 502, h);
+      } else if (review) {
+        if (!Array.isArray(out?.have)) return json({ error: "parse", ...paid }, 502, h);
+        out.score = Math.max(0, Math.min(100, Math.round(Number(out.score) || 0)));
+      } else {
+        if (!out?.cv?.name && !out?.cv?.experience?.length) return json({ error: "parse", ...paid }, 502, h);
+        out.cv.lang = /^pt/i.test(out.cv.lang || "") ? "pt" : "en";
+        // The page reads the letter as the CV's sibling with its own lang, name and contact
+        out.letter = out.letter?.paragraphs?.length ? { ...out.letter, lang: out.cv.lang, name: out.cv.name, contact: out.cv.contact } : null;
+      }
+      await env.JOB.put(key, JSON.stringify(out), { expirationTtl: CACHE_DAYS * 86400 });
+      if (uid && price && !free) { const now = Math.max(0, (await credits(env, uid)) - price); await env.JOB.put(`credits:${uid}`, String(now)); paid = { credits: now, price }; }
+      return json({ ...out, cached: false, model, ...paid }, 200, h);
+    };
+    if (review) return work();
+    const { readable, writable } = new TransformStream(), out = writable.getWriter(), te = new TextEncoder();
+    const beat = setInterval(() => out.write(te.encode(" ")).catch(() => {}), 15000);
+    const done = (async () => { let r; try { r = await work(); } catch (e) { console.error("tailor_failed", e?.message); r = json({ error: "ai" }, 502, h); }
+      clearInterval(beat); const j = await r.json().catch(() => ({ error: "ai" }));
+      await out.write(te.encode(JSON.stringify(r.ok ? j : { ...j, _status: r.status }))).catch(() => {}); await out.close().catch(() => {}); })();
+    if (ctx && ctx.waitUntil) ctx.waitUntil(done);
+    return new Response(readable, { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...h } });
   },
 };

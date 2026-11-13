@@ -133,7 +133,8 @@ test("accounts: Face ID creates an account with 5 credits; signing in works; a f
   assert.equal(bad.status, 401);
   // a run that fails (the fake AI key) takes no credits
   const t = await call("/tailor", { headers: { cookie }, body: { cv: "Alex Morgan, QA engineer. ".repeat(20), job: "We need a QA engineer with Playwright. ".repeat(5) } });
-  assert.notEqual(t.status, 200);
+  // the tailoring streams (APP-DR-004): its real status rides in the body
+  const tb = await t.json(); assert.ok(tb.error, "the run failed"); assert.ok(tb._status >= 400, "with an error status inside");
   assert.equal((await (await call("/me", { method: "GET", headers: { cookie } })).json()).credits, 5);
   // sign out ends the session
   await call("/account/signout", { headers: { cookie } });

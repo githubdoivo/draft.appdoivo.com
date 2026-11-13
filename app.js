@@ -377,8 +377,10 @@ async function api(path, body) {
   }
   // the signed-in account pays (cookie); signed out: sign in first, then carry on
   if (!acct.signedIn) { const how = await askSignIn(); if (!how) return null; }
-  const res = await fetch(`${API}${path}`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const data = await res.json().catch(() => ({}));
+  const raw = await fetch(`${API}${path}`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const data = await raw.json().catch(() => ({}));
+  // a long answer streams (APP-DR-004): its real status comes inside the body
+  const res = { status: data._status || raw.status, ok: data._status ? false : raw.ok };
   if (res.status === 401 && data.error === "signin") { acct.signedIn = false; paintAcct(); const how = await askSignIn(); if (!how) return null; return api(path, body); }
   if (data.balance) showCredit(data.balance);
   if (typeof data.credits === "number") { acct.credits = data.credits; paintAcct(); }
